@@ -13,6 +13,8 @@
     "dev": "concurrently --kill-others-on-fail --names shared,server,client --prefix-colors yellow,blue,magenta \"npm run dev --workspace=@drawing-game/shared\" \"npm run dev --workspace=@drawing-game/server\" \"npm run dev --workspace=@drawing-game/client\"",
     "build": "npm run build --workspace=@drawing-game/shared && npm run build --workspace=@drawing-game/server && npm run build --workspace=@drawing-game/client",
     "start": "npm run start --workspace=@drawing-game/server",
+    "pretest": "npm run build --workspace=@drawing-game/shared",
+    "test": "npm run test --workspace=@drawing-game/server",
     "typecheck": "npm run typecheck --workspace=@drawing-game/shared && npm run typecheck --workspace=@drawing-game/server && npm run typecheck --workspace=@drawing-game/client"
   },
   "engines": {
