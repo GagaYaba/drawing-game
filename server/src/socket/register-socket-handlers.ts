@@ -8,6 +8,7 @@ import {
   type RoomSessionData,
   type ServerToClientEvents,
   type StartGameSuccessData,
+  type SubmitDrawingSuccessData,
 } from "@drawing-game/shared";
 import type { Server } from "socket.io";
 
@@ -262,6 +263,32 @@ export function registerSocketHandlers(
         request.acknowledge(actionFailure(error));
       }
     });
+
+    socket.on(
+      SOCKET_EVENTS.DRAWING_SUBMIT,
+      (...argumentsReceived: unknown[]) => {
+        const request = getActionRequest<SubmitDrawingSuccessData>(
+          argumentsReceived,
+        );
+        if (request === null) {
+          return;
+        }
+
+        try {
+          const submission = gameManager.submitDrawing(
+            socket.id,
+            request.payload,
+          );
+          io.to(submission.room.code).emit(
+            SOCKET_EVENTS.ROOM_STATE,
+            submission.room,
+          );
+          request.acknowledge({ success: true, data: submission });
+        } catch (error) {
+          request.acknowledge(actionFailure(error));
+        }
+      },
+    );
 
     socket.on("disconnect", (reason) => {
       const currentRoom = roomManager.getPlayerRoomBySocketId(socket.id);

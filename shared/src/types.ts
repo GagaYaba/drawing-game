@@ -1,4 +1,5 @@
 import { SOCKET_EVENTS } from "./events.js";
+import type { DrawingDocument } from "./drawing.js";
 
 export interface ClientPingPayload {
   sentAt: number;
@@ -16,7 +17,12 @@ export interface PublicPlayer {
   isReady: boolean;
 }
 
-export type GamePhase = "LOBBY" | "ROUND_INTRO" | "DRAWING";
+export type GamePhase = "LOBBY" | "ROUND_INTRO" | "DRAWING" | "VOTING";
+
+export interface PublicSubmittedDrawing {
+  document: DrawingDocument;
+  submittedAt: number;
+}
 
 export interface PublicGameState {
   phase: GamePhase;
@@ -33,6 +39,7 @@ export interface PublicGameState {
     text: string;
   };
   phaseEndsAt: number | null;
+  submittedDrawing: PublicSubmittedDrawing | null;
 }
 
 export interface PublicRoomState {
@@ -59,6 +66,14 @@ export interface SetPlayerReadyPayload {
   isReady: boolean;
 }
 
+export interface SubmitDrawingPayload {
+  drawing: DrawingDocument;
+}
+
+export interface SubmitDrawingSuccessData {
+  room: PublicRoomState;
+}
+
 export type RoomErrorCode =
   | "INVALID_NICKNAME"
   | "INVALID_ROOM_CODE"
@@ -75,6 +90,13 @@ export type RoomErrorCode =
   | "PLAYERS_NOT_READY"
   | "GAME_ALREADY_STARTED"
   | "GAME_NOT_IN_LOBBY"
+  | "GAME_NOT_STARTED"
+  | "NOT_DRAWING_PHASE"
+  | "NOT_CURRENT_DRAWER"
+  | "EMPTY_DRAWING"
+  | "INVALID_DRAWING"
+  | "DRAWING_TOO_LARGE"
+  | "DRAWING_ALREADY_SUBMITTED"
   | "INTERNAL_ERROR";
 
 export type ActionResult<T> =
@@ -136,6 +158,10 @@ export interface ClientToServerEvents {
   ) => void;
   [SOCKET_EVENTS.GAME_START]: (
     acknowledge: ActionAcknowledgement<StartGameSuccessData>,
+  ) => void;
+  [SOCKET_EVENTS.DRAWING_SUBMIT]: (
+    payload: SubmitDrawingPayload,
+    acknowledge: ActionAcknowledgement<SubmitDrawingSuccessData>,
   ) => void;
 }
 

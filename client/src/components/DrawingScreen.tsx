@@ -1,6 +1,10 @@
-import type { PublicGameState } from "@drawing-game/shared";
+import type {
+  DrawingDocument,
+  PublicGameState,
+} from "@drawing-game/shared";
 
 import type { PendingRoomAction } from "../hooks/useRoomSession";
+import { DrawingEditor } from "./drawing/DrawingEditor";
 
 interface DrawingScreenProps {
   game: PublicGameState;
@@ -8,6 +12,7 @@ interface DrawingScreenProps {
   secretLevel: number | null;
   pendingAction: PendingRoomAction;
   errorMessage: string | null;
+  onSubmitDrawing: (drawing: DrawingDocument) => boolean;
   onLeaveRoom: () => void;
 }
 
@@ -17,10 +22,12 @@ export function DrawingScreen({
   secretLevel,
   pendingAction,
   errorMessage,
+  onSubmitDrawing,
   onLeaveRoom,
 }: DrawingScreenProps) {
   const isDrawer = currentPlayerId === game.currentDrawer.id;
   const isPending = pendingAction !== null;
+  const isSubmitting = pendingAction === "submitDrawing";
 
   return (
     <section
@@ -88,24 +95,28 @@ export function DrawingScreen({
                 <span>/ 10</span>
               </p>
             )}
+            <p>Gardez ce nombre visible pendant toute la création.</p>
           </aside>
 
-          <div
-            className="drawing-placeholder"
-            role="img"
-            aria-label="Emplacement de la future zone de dessin"
-          >
-            <strong>Zone de dessin à venir</strong>
-            <span>Le canvas et ses outils seront ajoutés à l’étape suivante.</span>
-          </div>
+          <DrawingEditor
+            disabled={isPending || secretLevel === null}
+            isSubmitting={isSubmitting}
+            onSubmit={onSubmitDrawing}
+          />
         </div>
       ) : (
-        <aside className="waiting-card drawing-waiting" aria-labelledby="drawing-wait-title">
+        <aside
+          className="waiting-card drawing-waiting"
+          aria-labelledby="drawing-wait-title"
+        >
           <p className="card-label">En attendant le dessin</p>
           <h3 id="drawing-wait-title">
             {game.currentDrawer.nickname} dessine en ce moment
           </h3>
-          <p>Vous découvrirez bientôt son dessin et pourrez estimer son niveau.</p>
+          <p>
+            La consigne est visible par tous, mais son niveau reste secret. Le
+            dessin apparaîtra seulement après sa validation.
+          </p>
         </aside>
       )}
 
@@ -128,7 +139,9 @@ export function DrawingScreen({
         <p className="visually-hidden" role="status" aria-live="polite">
           {pendingAction === "leave"
             ? "Départ de la partie en cours."
-            : "Action en cours."}
+            : pendingAction === "submitDrawing"
+              ? "Envoi du dessin en cours."
+              : "Action en cours."}
         </p>
       )}
     </section>

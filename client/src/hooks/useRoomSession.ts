@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 import {
   SOCKET_EVENTS,
+  type DrawingDocument,
   type GameCancelledPayload,
   type PublicRoomState,
   type TurnSecretPayload,
@@ -23,6 +24,7 @@ export type PendingRoomAction =
   | "join"
   | "ready"
   | "start"
+  | "submitDrawing"
   | "leave"
   | null;
 
@@ -109,6 +111,15 @@ export function useRoomSession() {
       currentRoomCodeRef.current = room.code;
 
       if (
+        pendingActionRef.current === "submitDrawing" &&
+        room.game?.phase !== "DRAWING"
+      ) {
+        pendingActionRef.current = null;
+        actionTokenRef.current += 1;
+        setPendingAction(null);
+      }
+
+      if (
         room.game === null ||
         room.game.currentDrawer.id !== currentPlayerId
       ) {
@@ -149,6 +160,12 @@ export function useRoomSession() {
       setGameSecrets(EMPTY_GAME_SECRETS);
       setErrorMessage(null);
       setNoticeMessage(payload.message);
+
+      if (pendingActionRef.current === "submitDrawing") {
+        pendingActionRef.current = null;
+        actionTokenRef.current += 1;
+        setPendingAction(null);
+      }
     };
 
     const handleDisconnect = () => {
@@ -420,6 +437,73 @@ export function useRoomSession() {
     );
   };
 
+  const submitDrawing = (drawing: DrawingDocument) => {
+    if (
+      pendingActionRef.current !== null ||
+      session.room === null ||
+      !ensureSocketIsConnected()
+    ) {
+      return false;
+    }
+
+    const game = session.room.game;
+    if (game === null) {
+      setErrorMessage("Aucune partie n’est en cours.");
+      return false;
+    }
+
+    if (game.phase !== "DRAWING") {
+      setErrorMessage("Le dessin ne peut pas être envoyé pendant cette phase.");
+      return false;
+    }
+
+    if (
+      session.currentPlayerId === null ||
+      game.currentDrawer.id !== session.currentPlayerId
+    ) {
+      setErrorMessage("Seul le dessinateur actuel peut envoyer un dessin.");
+      return false;
+    }
+
+    if (drawing.strokes.length === 0) {
+      setErrorMessage("Le dessin est vide.");
+      return false;
+    }
+
+    setErrorMessage(null);
+    setNoticeMessage(null);
+    const actionToken = beginAction("submitDrawing");
+
+    socket.timeout(ACTION_TIMEOUT_MS).emit(
+      SOCKET_EVENTS.DRAWING_SUBMIT,
+      { drawing },
+      (timeoutError, result) => {
+        if (actionToken !== actionTokenRef.current) {
+          return;
+        }
+
+        if (timeoutError) {
+          actionTokenRef.current += 1;
+          updatePendingAction(null);
+          setErrorMessage(
+            "La réponse du serveur a expiré. Votre dessin est conservé ; attendez la synchronisation du salon avant de réessayer.",
+          );
+          return;
+        }
+
+        if (!result.success) {
+          updatePendingAction(null);
+          setErrorMessage(result.error.message);
+        }
+
+        // En cas de succès, le serveur diffuse room:state. Cet événement est le
+        // seul à faire quitter DRAWING ; on garde donc l'action bloquée jusque-là.
+      },
+    );
+
+    return true;
+  };
+
   const leaveRoom = () => {
     if (
       pendingActionRef.current !== null ||
@@ -475,6 +559,7 @@ export function useRoomSession() {
     joinRoom,
     setReady,
     startGame,
+    submitDrawing,
     leaveRoom,
   };
 }

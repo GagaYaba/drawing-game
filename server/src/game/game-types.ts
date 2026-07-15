@@ -1,4 +1,5 @@
 import type {
+  DrawingDocument,
   GamePhase,
   PublicRoomState,
   TurnSecretPayload,
@@ -14,6 +15,8 @@ export interface InternalTurn {
   drawerPlayerId: string;
   prompt: DrawingPrompt;
   secretLevel: number;
+  drawing: DrawingDocument | null;
+  drawingSubmittedAt: number | null;
 }
 
 export interface InternalGame {
@@ -58,4 +61,8 @@ export interface StartGameInternalResult {
   room: PublicRoomState;
   drawerSocketId: string;
   secret: TurnSecretPayload;
+}
+
+export interface SubmitDrawingInternalResult {
+  room: PublicRoomState;
 }

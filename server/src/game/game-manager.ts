@@ -4,6 +4,10 @@ import type { RoomManager } from "../rooms/room-manager.js";
 import { RoomManagerError } from "../rooms/room-types.js";
 import type { InternalPlayer } from "../rooms/room-types.js";
 import {
+  cloneDrawingDocument,
+  validateSubmitDrawingPayload,
+} from "./drawing-validation.js";
+import {
   generateSecretLevel,
   selectDrawingPrompt,
   shufflePlayerIds,
@@ -13,6 +17,7 @@ import type {
   GameManagerOptions,
   InternalGame,
   StartGameInternalResult,
+  SubmitDrawingInternalResult,
 } from "./game-types.js";
 import { DRAWING_PROMPTS } from "./prompt-bank.js";
 
@@ -74,6 +79,19 @@ export function toPublicGameState(
     );
   }
 
+  const { drawing, drawingSubmittedAt } = game.currentTurn;
+  if (
+    game.phase === "VOTING" &&
+    (drawing === null ||
+      drawingSubmittedAt === null ||
+      !Number.isFinite(drawingSubmittedAt))
+  ) {
+    throw new RoomManagerError(
+      "INTERNAL_ERROR",
+      "Le dessin soumis est introuvable.",
+    );
+  }
+
   return {
     phase: game.phase,
     totalRounds: game.totalRounds,
@@ -89,6 +107,15 @@ export function toPublicGameState(
       text: game.currentTurn.prompt.text,
     },
     phaseEndsAt: game.phaseEndsAt,
+    submittedDrawing:
+      game.phase === "VOTING" &&
+      drawing !== null &&
+      drawingSubmittedAt !== null
+        ? {
+            document: cloneDrawingDocument(drawing),
+            submittedAt: drawingSubmittedAt,
+          }
+        : null,
   };
 }
 
@@ -242,6 +269,8 @@ export class GameManager {
         drawerPlayerId: drawer.id,
         prompt: selectedPrompt,
         secretLevel,
+        drawing: null,
+        drawingSubmittedAt: null,
       },
       startedAt,
       phaseEndsAt: startedAt + this.introDurationMs,
@@ -273,6 +302,104 @@ export class GameManager {
       throw new RoomManagerError(
         "INTERNAL_ERROR",
         "Impossible de programmer le début du dessin.",
+      );
+    }
+  }
+
+  submitDrawing(
+    socketId: string,
+    payload: unknown,
+  ): SubmitDrawingInternalResult {
+    const room = this.roomManager.getPlayerRoomBySocketId(socketId);
+    if (room === undefined) {
+      throw new RoomManagerError(
+        "NOT_IN_ROOM",
+        "Cette connexion n'appartient à aucun salon.",
+      );
+    }
+
+    const game = room.game;
+    if (game === null) {
+      throw new RoomManagerError(
+        "GAME_NOT_STARTED",
+        "Aucune partie n’est en cours.",
+      );
+    }
+
+    if (game.phase !== "DRAWING") {
+      throw new RoomManagerError(
+        "NOT_DRAWING_PHASE",
+        "Le dessin ne peut pas être envoyé pendant cette phase.",
+      );
+    }
+
+    const requester = room.players.find(
+      (player) => player.socketId === socketId,
+    );
+    if (requester === undefined) {
+      throw new RoomManagerError(
+        "PLAYER_NOT_FOUND",
+        "Le joueur associé à cette connexion est introuvable.",
+      );
+    }
+
+    if (requester.id !== game.currentTurn.drawerPlayerId) {
+      throw new RoomManagerError(
+        "NOT_CURRENT_DRAWER",
+        "Seul le dessinateur actuel peut envoyer un dessin.",
+      );
+    }
+
+    if (
+      game.currentTurn.drawing !== null ||
+      game.currentTurn.drawingSubmittedAt !== null
+    ) {
+      throw new RoomManagerError(
+        "DRAWING_ALREADY_SUBMITTED",
+        "Un dessin a déjà été envoyé pour ce tour.",
+      );
+    }
+
+    const validation = validateSubmitDrawingPayload(payload);
+    if (!validation.success) {
+      throw new RoomManagerError(
+        validation.error.code,
+        validation.error.message,
+      );
+    }
+
+    const submittedAt = this.clock();
+    if (!Number.isFinite(submittedAt)) {
+      throw new RoomManagerError(
+        "INTERNAL_ERROR",
+        "Impossible de dater la soumission du dessin.",
+      );
+    }
+
+    const previousPhase = game.phase;
+    const previousPhaseEndsAt = game.phaseEndsAt;
+    game.currentTurn.drawing = validation.document;
+    game.currentTurn.drawingSubmittedAt = submittedAt;
+    game.phase = "VOTING";
+    game.phaseEndsAt = null;
+
+    try {
+      return {
+        room: this.roomManager.getPublicRoomState(room.code),
+      };
+    } catch (error) {
+      game.currentTurn.drawing = null;
+      game.currentTurn.drawingSubmittedAt = null;
+      game.phase = previousPhase;
+      game.phaseEndsAt = previousPhaseEndsAt;
+
+      if (error instanceof RoomManagerError) {
+        throw error;
+      }
+
+      throw new RoomManagerError(
+        "INTERNAL_ERROR",
+        "Impossible de publier le dessin soumis.",
       );
     }
   }

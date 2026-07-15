@@ -4,6 +4,7 @@ import { HealthCheck } from "./components/HealthCheck";
 import { HomeScreen } from "./components/HomeScreen";
 import { LobbyScreen } from "./components/LobbyScreen";
 import { RoundIntroScreen } from "./components/RoundIntroScreen";
+import { VotingScreen } from "./components/VotingScreen";
 import { useRoomSession } from "./hooks/useRoomSession";
 
 export function App() {
@@ -60,8 +61,18 @@ export function App() {
           errorMessage={roomSession.errorMessage}
           onLeaveRoom={roomSession.leaveRoom}
         />
-      ) : (
+      ) : game.phase === "DRAWING" ? (
         <DrawingScreen
+          game={game}
+          currentPlayerId={currentPlayerId}
+          secretLevel={currentPlayerSecret}
+          pendingAction={roomSession.pendingAction}
+          errorMessage={roomSession.errorMessage}
+          onSubmitDrawing={roomSession.submitDrawing}
+          onLeaveRoom={roomSession.leaveRoom}
+        />
+      ) : (
+        <VotingScreen
           game={game}
           currentPlayerId={currentPlayerId}
           secretLevel={currentPlayerSecret}

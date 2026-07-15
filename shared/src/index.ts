@@ -1,4 +1,22 @@
 export { SOCKET_EVENTS } from "./events.js";
+export {
+  DRAWING_ALLOWED_STROKE_WIDTHS,
+  DRAWING_ASPECT_RATIO,
+  DRAWING_BACKGROUND_COLOR,
+  DRAWING_COLOR_PALETTE,
+  DRAWING_DOCUMENT_VERSION,
+  DRAWING_MAX_POINTS_PER_STROKE,
+  DRAWING_MAX_STROKES,
+  DRAWING_MAX_TOTAL_POINTS,
+} from "./drawing.js";
+export type {
+  DrawingColor,
+  DrawingDocument,
+  DrawingPoint,
+  DrawingStroke,
+  DrawingStrokeWidth,
+  DrawingTool,
+} from "./drawing.js";
 export type {
   ActionAcknowledgement,
   ActionResult,
@@ -12,11 +30,14 @@ export type {
   JoinRoomPayload,
   PublicPlayer,
   PublicGameState,
+  PublicSubmittedDrawing,
   PublicRoomState,
   RoomErrorCode,
   RoomSessionData,
   SetPlayerReadyPayload,
   StartGameSuccessData,
+  SubmitDrawingPayload,
+  SubmitDrawingSuccessData,
   ServerPongPayload,
   ServerToClientEvents,
   TurnSecretPayload,

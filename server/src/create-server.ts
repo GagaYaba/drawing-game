@@ -23,12 +23,20 @@ export interface CreateDrawingGameServerOptions {
   gameManagerOptions?: GameManagerOptions;
 }
 
+// A canonical 30,000-point drawing can exceed Engine.IO's 1 MB default once
+// serialized with full-precision coordinates. Keep this finite and comfortably
+// above the largest document allowed by the shared complexity limits.
+export const MAX_SOCKET_MESSAGE_BYTES = 2_500_000;
+
 export function createDrawingGameServer(
   options: CreateDrawingGameServerOptions = {},
 ) {
   const app = express();
   const httpServer = createServer(app);
-  const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer);
+  const io = new Server<ClientToServerEvents, ServerToClientEvents>(
+    httpServer,
+    { maxHttpBufferSize: MAX_SOCKET_MESSAGE_BYTES },
+  );
   const roomManager = options.roomManager ?? new RoomManager();
   const externalRoomStateListener =
     options.gameManagerOptions?.onPublicRoomStateChanged;

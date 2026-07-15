@@ -1,6 +1,6 @@
 # Drawing Scale Game
 
-Application multijoueur en temps réel destinée à devenir un jeu de dessin. Cette version permet de créer et rejoindre des salons, de préparer les joueurs dans un lobby, de lancer une partie et de synchroniser le premier tour entre plusieurs navigateurs. Le dessin reste pour l'instant représenté par une zone provisoire non interactive.
+Application multijoueur de dessin en temps réel. Cette version permet de créer et rejoindre des salons, de préparer les joueurs dans un lobby, de lancer une partie, de réaliser le premier dessin vectoriel puis de le révéler à tous les joueurs.
 
 ## Fonctionnalités actuelles
 
@@ -9,10 +9,11 @@ Application multijoueur en temps réel destinée à devenir un jeu de dessin. Ce
 - liste des joueurs synchronisée en temps réel, avec identification de l'hôte et du joueur courant ;
 - statut `Prêt` ou `Pas prêt` modifiable par chaque joueur ;
 - lancement réservé à l'hôte à partir de 3 joueurs lorsque tout le monde est prêt ;
-- phases de partie `LOBBY`, `ROUND_INTRO` et `DRAWING`, pilotées par le serveur ;
+- phases de partie `LOBBY`, `ROUND_INTRO`, `DRAWING` et `VOTING`, pilotées par le serveur ;
 - affichage de la consigne publique et envoi d'un niveau secret uniquement au dessinateur courant ;
 - structure de partie prévue pour 2 manches, avec uniquement le premier tour exécuté dans cette version ;
-- zone de dessin provisoire sans canvas ni outils ;
+- canvas vectoriel 4:3 compatible souris, tactile et stylet, avec crayon, gomme, palette, épaisseurs, annulation et effacement ;
+- soumission autorisée uniquement au dessinateur courant et aperçu synchronisé du dessin en phase `VOTING` ;
 - fermeture du salon aux nouveaux joueurs dès le lancement ;
 - annulation de la partie et retour au lobby si un joueur quitte ou se déconnecte ;
 - départ volontaire ou retrait automatique à la déconnexion, avec transfert du rôle d'hôte au joueur présent depuis le plus longtemps ;
@@ -34,7 +35,7 @@ Un salon peut être créé par un joueur seul, en attendant les autres, et accep
 
 | Workspace | Rôle |
 | --- | --- |
-| `client` | Écrans d'accueil, de lobby, d'introduction du tour et de dessin provisoire React, session locale, connexion Socket.IO et proxy Vite en développement. |
+| `client` | Écrans React, éditeur vectoriel sur canvas, aperçu réutilisable, session locale, connexion Socket.IO et proxy Vite en développement. |
 | `server` | API Express, gestion en mémoire des salons et du premier tour, serveur HTTP/Socket.IO, tests et hébergement du frontend construit en production. |
 | `shared` | Noms des événements, payloads et états publics typés échangés entre le client et le serveur. |
 
@@ -108,11 +109,54 @@ Le serveur reste la source d'autorité pour les phases et leurs transitions :
 
 1. `LOBBY` : les joueurs rejoignent le salon, se déclarent prêts et l'hôte lance la partie.
 2. `ROUND_INTRO` : tous voient la manche, le numéro du tour, le dessinateur et la consigne publique. Cette introduction dure environ 3 secondes ; l'interface affiche un compte à rebours dérivé de l'heure de fin envoyée par le serveur, sans changer elle-même de phase.
-3. `DRAWING` : la transition est diffusée par le serveur. Le dessinateur voit la consigne, son niveau secret sur 10 et une zone de dessin provisoire. Les autres joueurs voient la consigne, l'identité du dessinateur et un écran d'attente, mais jamais son niveau secret.
+3. `DRAWING` : la transition est diffusée par le serveur. Le dessinateur voit la consigne, son niveau secret sur 10 et l'éditeur vectoriel. Les autres joueurs voient la consigne, l'identité du dessinateur et un écran d'attente, mais jamais son niveau secret.
+4. `VOTING` : après confirmation et validation de la soumission, le serveur stocke le dessin, horodate la soumission et diffuse le même aperçu à tout le salon. Aucun vote n'est encore proposé dans cette version.
 
-La partie est structurée pour **2 manches**, mais cette version s'arrête au premier tour de la première manche. La rotation du dessinateur, les tours suivants et la fin de partie ne sont pas encore implémentés.
+La partie est structurée pour **2 manches**, mais cette version s'arrête à la révélation du premier dessin du premier tour. La rotation du dessinateur, les tours suivants et la fin de partie ne sont pas encore implémentés.
 
 Le niveau secret est transmis avec l'événement privé `turn:secret` au seul socket du dessinateur. Il ne fait pas partie de l'état public du salon ni des diffusions destinées aux autres joueurs.
+
+## Dessin vectoriel
+
+Le client conserve le dessin en mémoire sous forme de traits vectoriels plutôt que d'image bitmap. Les coordonnées sont normalisées entre `0` et `1`, indépendamment de la taille d'affichage et de la densité de pixels de l'écran. Le canvas logique est au format **4:3** (`1200 × 900`) et adapte son buffer au `devicePixelRatio`.
+
+Un document échangé entre le client et le serveur suit ce format :
+
+```ts
+interface DrawingDocument {
+  version: 1;
+  aspectRatio: "4:3";
+  backgroundColor: "#FFFFFF";
+  strokes: Array<{
+    tool: "pen" | "eraser";
+    color: string;
+    width: 4 | 8 | 14;
+    points: Array<{ x: number; y: number }>;
+  }>;
+}
+```
+
+La palette autorisée contient `#111111`, `#E53935`, `#1E88E5`, `#43A047`, `#FB8C00` et `#8E24AA`. Une gomme est canonisée avec la couleur de fond blanche. Le rendu partagé gère les extrémités et jointures arrondies ainsi que les traits constitués d'un seul point.
+
+Les constantes de format et de complexité vivent dans le workspace `shared`. Le serveur reconstruit un document sûr à partir du payload reçu et refuse notamment :
+
+- les objets qui ont des clés absentes ou supplémentaires, les types inattendus, les nombres non finis et les coordonnées hors de `[0, 1]` ;
+- une couleur, une épaisseur ou un outil non autorisé ;
+- un dessin vide ;
+- plus de 250 traits, plus de 300 points par trait ou plus de 30 000 points au total.
+
+La limite de message Socket.IO est fixée à 2,5 Mo afin qu'un document valide de 30 000 points, même sérialisé avec des coordonnées longues, atteigne bien le validateur applicatif au lieu d'être coupé par la limite Engine.IO par défaut.
+
+La soumission utilise l'événement `drawing:submit` avec le payload `{ drawing }`. Le serveur vérifie l'appartenance au salon, l'existence de la partie, la phase, le joueur et le rôle de dessinateur avant de valider le contenu. Une soumission acceptée est atomique : le dessin et son horodatage sont enregistrés, la phase passe à `VOTING`, `phaseEndsAt` devient `null`, puis le nouvel état public est diffusé. Le niveau secret ne rejoint jamais cet état public.
+
+### Essai manuel du canvas
+
+1. Démarrez trois clients, préparez le salon et attendez la phase `DRAWING`.
+2. Sur le client dessinateur, essayez le tracé à la souris puis, sur un appareil compatible, au doigt et au stylet. Un clic ou toucher sans déplacement doit produire un point.
+3. Vérifiez les six couleurs, les trois épaisseurs, la gomme, **Annuler** et **Tout effacer**. Cette dernière action demande confirmation.
+4. Redimensionnez la fenêtre jusque 320 px de large : le canvas doit conserver son ratio sans débordement et le dessin doit rester identique.
+5. Confirmez la soumission. Les trois clients doivent passer en `VOTING` et afficher exactement le même aperçu ; aucun client non dessinateur ne doit voir les outils ni le niveau secret.
+6. Vérifiez aussi `/api/health`, le bouton de ping Socket.IO, puis le build et le lancement de production décrits plus bas.
 
 ## Stockage et durée de vie des salons
 
@@ -120,7 +164,7 @@ Les salons, les joueurs et l'état de partie sont stockés **uniquement dans la 
 
 La session du navigateur n'est pas persistée. Une actualisation de page ou une déconnexion Socket.IO retire immédiatement le joueur du salon et lui fait perdre sa session locale ; aucune reconnexion automatique n'est mise en place.
 
-Dans le lobby, le joueur doit rejoindre manuellement le salon s'il existe encore et le rôle d'hôte est transféré si nécessaire. Pendant `ROUND_INTRO` ou `DRAWING`, le départ volontaire, la déconnexion ou l'actualisation de n'importe quel joueur annule la partie pour tout le groupe. Les joueurs restants reviennent au lobby avec un message explicatif et doivent de nouveau préparer le salon avant un prochain lancement.
+Dans le lobby, le joueur doit rejoindre manuellement le salon s'il existe encore et le rôle d'hôte est transféré si nécessaire. Pendant `ROUND_INTRO`, `DRAWING` ou `VOTING`, le départ volontaire, la déconnexion ou l'actualisation de n'importe quel joueur annule la partie pour tout le groupe. Les joueurs restants reviennent au lobby avec un message explicatif et doivent de nouveau préparer le salon avant un prochain lancement.
 
 ## Vérification des types
 
@@ -138,7 +182,7 @@ Exécutez les tests depuis la racine :
 npm test
 ```
 
-Cette commande lance les tests Vitest du serveur : tests unitaires de la logique des salons et de la partie, ainsi que des tests d'intégration avec un serveur sur un port éphémère et de vrais clients Socket.IO. Ils couvrent notamment la capacité maximale, la validation, les conditions de lancement, le rôle de l'hôte, les transitions de phase, la confidentialité du niveau secret, l'annulation sur départ ou déconnexion et l'isolation entre salons.
+Cette commande lance les tests Vitest : tests unitaires de la logique des salons, de la partie, du document vectoriel et de sa géométrie, ainsi que des tests d'intégration avec un serveur sur un port éphémère et de vrais clients Socket.IO. Ils couvrent notamment la capacité maximale, la validation stricte du dessin, les autorisations de soumission, les transitions de phase, la confidentialité du niveau secret, l'annulation sur départ ou déconnexion et l'isolation entre salons.
 
 ## Build et lancement en production
 
@@ -185,7 +229,7 @@ En développement, le même endpoint est également disponible via le proxy du f
 
 Le bouton envoie l'événement `client:ping`. Le serveur répond uniquement au client concerné avec `server:pong` ; les noms d'événements et leurs payloads sont déclarés dans le workspace `shared`.
 
-Les actions du lobby utilisent également des événements typés : `room:create`, `room:join`, `room:leave`, `player:set-ready` et `game:start`. Le serveur diffuse ensuite l'état public à jour avec `room:state`, sans exposer les identifiants Socket.IO internes ni le niveau secret.
+Les actions utilisent également des événements typés : `room:create`, `room:join`, `room:leave`, `player:set-ready`, `game:start` et `drawing:submit`. Le serveur diffuse ensuite l'état public à jour avec `room:state`, sans exposer les identifiants Socket.IO internes ni le niveau secret.
 
 Pendant la partie, `turn:secret` est envoyé uniquement au dessinateur et `game:cancelled` informe les joueurs restants qu'un départ ou une déconnexion a interrompu la partie.
 
@@ -193,7 +237,6 @@ Pendant la partie, `turn:secret` est envoyé uniquement au dessinateur et `game:
 
 Cette version ne comprend pas encore :
 
-- un canvas, des outils de dessin ou l'envoi d'un dessin ;
 - la rotation des dessinateurs, le passage au deuxième tour ou à la deuxième manche et la fin de partie ;
 - les votes, estimations, scores ou résultats ;
 - une durée de dessin et un chronomètre de fin de tour ;
