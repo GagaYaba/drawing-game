@@ -68,6 +68,7 @@ describe("RoomManager", () => {
         minimumPlayersToStart: 3,
         allPlayersReady: false,
         canStart: false,
+        game: null,
       },
     });
     expect(result.room.players[0]).not.toHaveProperty("socketId");

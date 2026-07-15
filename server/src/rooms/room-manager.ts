@@ -2,6 +2,8 @@ import { randomInt, randomUUID } from "node:crypto";
 
 import type { PublicPlayer, PublicRoomState } from "@drawing-game/shared";
 
+import { toPublicGameState } from "../game/game-manager.js";
+
 import {
   getNicknameComparisonKey,
   normalizeNickname,
@@ -87,6 +89,7 @@ export class RoomManager {
       code,
       players: [player],
       createdAt: timestamp,
+      game: null,
     };
 
     this.rooms.set(code, room);
@@ -113,6 +116,13 @@ export class RoomManager {
       throw new RoomManagerError(
         "ROOM_NOT_FOUND",
         "Aucun salon ne correspond à ce code.",
+      );
+    }
+
+    if (room.game !== null) {
+      throw new RoomManagerError(
+        "GAME_ALREADY_STARTED",
+        "Cette partie a déjà commencé.",
       );
     }
 
@@ -198,6 +208,14 @@ export class RoomManager {
       throw new RoomManagerError(
         "PLAYER_NOT_FOUND",
         "Le joueur associé à cette connexion est introuvable.",
+      );
+    }
+
+
+    if (room.game !== null) {
+      throw new RoomManagerError(
+        "GAME_ALREADY_STARTED",
+        "Cette partie a déjà commencé.",
       );
     }
 
@@ -365,7 +383,13 @@ export class RoomManager {
       minimumPlayersToStart: MINIMUM_PLAYERS_TO_START,
       allPlayersReady,
       canStart:
-        players.length >= MINIMUM_PLAYERS_TO_START && allPlayersReady,
+        room.game === null &&
+        players.length >= MINIMUM_PLAYERS_TO_START &&
+        allPlayersReady,
+      game:
+        room.game === null
+          ? null
+          : toPublicGameState(room.game, room.players),
     };
   }
 }

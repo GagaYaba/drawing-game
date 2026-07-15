@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from "react";
 
 import {
   SOCKET_EVENTS,
+  type GameCancelledPayload,
   type PublicRoomState,
+  type TurnSecretPayload,
 } from "@drawing-game/shared";
 
 import { socket } from "../socket/socket";
@@ -12,11 +14,25 @@ export interface ClientRoomSession {
   room: PublicRoomState | null;
 }
 
-export type PendingRoomAction = "create" | "join" | "ready" | "leave" | null;
+export interface ClientGameSecrets {
+  secretLevel: number | null;
+}
+
+export type PendingRoomAction =
+  | "create"
+  | "join"
+  | "ready"
+  | "start"
+  | "leave"
+  | null;
 
 const EMPTY_SESSION: ClientRoomSession = {
   currentPlayerId: null,
   room: null,
+};
+
+const EMPTY_GAME_SECRETS: ClientGameSecrets = {
+  secretLevel: null,
 };
 
 const ACTION_TIMEOUT_MS = 8_000;
@@ -53,11 +69,15 @@ export function useRoomSession() {
   const [roomCode, setRoomCode] = useState(getInitialRoomCode);
   const [session, setSession] = useState<ClientRoomSession>(EMPTY_SESSION);
   const currentPlayerIdRef = useRef<string | null>(null);
+  const currentRoomCodeRef = useRef<string | null>(null);
+  const [gameSecrets, setGameSecrets] =
+    useState<ClientGameSecrets>(EMPTY_GAME_SECRETS);
   const [pendingAction, setPendingAction] =
     useState<PendingRoomAction>(null);
   const pendingActionRef = useRef<PendingRoomAction>(null);
   const actionTokenRef = useRef(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [noticeMessage, setNoticeMessage] = useState<string | null>(null);
 
   useEffect(() => {
     const handleRoomState = (room: PublicRoomState) => {
@@ -73,9 +93,12 @@ export function useRoomSession() {
 
       if (!currentPlayerIsPresent) {
         currentPlayerIdRef.current = null;
+        currentRoomCodeRef.current = null;
         pendingActionRef.current = null;
         actionTokenRef.current += 1;
         setPendingAction(null);
+        setGameSecrets(EMPTY_GAME_SECRETS);
+        setNoticeMessage(null);
         setErrorMessage(
           "Vous ne faites plus partie de ce salon. Vous pouvez en rejoindre un autre.",
         );
@@ -83,7 +106,49 @@ export function useRoomSession() {
         return;
       }
 
+      currentRoomCodeRef.current = room.code;
+
+      if (
+        room.game === null ||
+        room.game.currentDrawer.id !== currentPlayerId
+      ) {
+        setGameSecrets(EMPTY_GAME_SECRETS);
+      }
+
+      if (room.game !== null) {
+        setNoticeMessage(null);
+        setErrorMessage(null);
+      }
+
       setSession({ currentPlayerId, room });
+    };
+
+    const handleTurnSecret = (payload: TurnSecretPayload) => {
+      if (
+        currentPlayerIdRef.current === null ||
+        payload.roomCode !== currentRoomCodeRef.current ||
+        payload.drawerPlayerId !== currentPlayerIdRef.current ||
+        !Number.isInteger(payload.secretLevel) ||
+        payload.secretLevel < 1 ||
+        payload.secretLevel > 10
+      ) {
+        return;
+      }
+
+      setGameSecrets({ secretLevel: payload.secretLevel });
+    };
+
+    const handleGameCancelled = (payload: GameCancelledPayload) => {
+      if (
+        currentPlayerIdRef.current === null ||
+        currentRoomCodeRef.current === null
+      ) {
+        return;
+      }
+
+      setGameSecrets(EMPTY_GAME_SECRETS);
+      setErrorMessage(null);
+      setNoticeMessage(payload.message);
     };
 
     const handleDisconnect = () => {
@@ -95,9 +160,12 @@ export function useRoomSession() {
       }
 
       currentPlayerIdRef.current = null;
+      currentRoomCodeRef.current = null;
       pendingActionRef.current = null;
       actionTokenRef.current += 1;
       setPendingAction(null);
+      setGameSecrets(EMPTY_GAME_SECRETS);
+      setNoticeMessage(null);
       setErrorMessage(
         hadActiveSession
           ? "La connexion au salon a été interrompue. Rejoignez-le à nouveau pour continuer."
@@ -107,10 +175,14 @@ export function useRoomSession() {
     };
 
     socket.on(SOCKET_EVENTS.ROOM_STATE, handleRoomState);
+    socket.on(SOCKET_EVENTS.TURN_SECRET, handleTurnSecret);
+    socket.on(SOCKET_EVENTS.GAME_CANCELLED, handleGameCancelled);
     socket.on("disconnect", handleDisconnect);
 
     return () => {
       socket.off(SOCKET_EVENTS.ROOM_STATE, handleRoomState);
+      socket.off(SOCKET_EVENTS.TURN_SECRET, handleTurnSecret);
+      socket.off(SOCKET_EVENTS.GAME_CANCELLED, handleGameCancelled);
       socket.off("disconnect", handleDisconnect);
     };
   }, []);
@@ -133,7 +205,10 @@ export function useRoomSession() {
 
     actionTokenRef.current += 1;
     currentPlayerIdRef.current = null;
+    currentRoomCodeRef.current = null;
     updatePendingAction(null);
+    setGameSecrets(EMPTY_GAME_SECRETS);
+    setNoticeMessage(null);
     setSession(EMPTY_SESSION);
     setErrorMessage(
       "La réponse du serveur est incertaine. La connexion a été réinitialisée ; rejoignez le salon avant de réessayer.",
@@ -171,6 +246,8 @@ export function useRoomSession() {
 
     setNickname(normalizedNickname);
     setErrorMessage(null);
+    setNoticeMessage(null);
+    setGameSecrets(EMPTY_GAME_SECRETS);
     const actionToken = beginAction("create");
 
     socket.timeout(ACTION_TIMEOUT_MS).emit(
@@ -195,6 +272,7 @@ export function useRoomSession() {
 
         setRoomCode(result.data.roomCode);
         currentPlayerIdRef.current = result.data.playerId;
+        currentRoomCodeRef.current = result.data.roomCode;
         setSession({
           currentPlayerId: result.data.playerId,
           room: result.data.room,
@@ -221,6 +299,8 @@ export function useRoomSession() {
     setNickname(normalizedNickname);
     setRoomCode(normalizedRoomCode);
     setErrorMessage(null);
+    setNoticeMessage(null);
+    setGameSecrets(EMPTY_GAME_SECRETS);
     const actionToken = beginAction("join");
 
     socket.timeout(ACTION_TIMEOUT_MS).emit(
@@ -245,6 +325,7 @@ export function useRoomSession() {
 
         setRoomCode(result.data.roomCode);
         currentPlayerIdRef.current = result.data.playerId;
+        currentRoomCodeRef.current = result.data.roomCode;
         setSession({
           currentPlayerId: result.data.playerId,
           room: result.data.room,
@@ -296,6 +377,49 @@ export function useRoomSession() {
     );
   };
 
+  const startGame = () => {
+    if (
+      pendingActionRef.current !== null ||
+      session.room === null ||
+      !ensureSocketIsConnected()
+    ) {
+      return;
+    }
+
+    setErrorMessage(null);
+    setNoticeMessage(null);
+    const actionToken = beginAction("start");
+
+    socket.timeout(ACTION_TIMEOUT_MS).emit(
+      SOCKET_EVENTS.GAME_START,
+      (timeoutError, result) => {
+        if (actionToken !== actionTokenRef.current) {
+          return;
+        }
+
+        if (timeoutError) {
+          resetAfterUncertainAction(actionToken);
+          return;
+        }
+
+        updatePendingAction(null);
+
+        if (!result.success) {
+          setErrorMessage(result.error.message);
+          return;
+        }
+
+        setSession((currentSession) => ({
+          currentPlayerId: currentSession.currentPlayerId,
+          room:
+            currentSession.currentPlayerId === null
+              ? currentSession.room
+              : result.data.room,
+        }));
+      },
+    );
+  };
+
   const leaveRoom = () => {
     if (
       pendingActionRef.current !== null ||
@@ -329,6 +453,9 @@ export function useRoomSession() {
 
         setErrorMessage(null);
         currentPlayerIdRef.current = null;
+        currentRoomCodeRef.current = null;
+        setGameSecrets(EMPTY_GAME_SECRETS);
+        setNoticeMessage(null);
         setSession(EMPTY_SESSION);
       },
     );
@@ -338,13 +465,16 @@ export function useRoomSession() {
     nickname,
     roomCode,
     session,
+    gameSecrets,
     pendingAction,
     errorMessage,
+    noticeMessage,
     setNickname,
     setRoomCode: (value: string) => setRoomCode(value.toUpperCase()),
     createRoom,
     joinRoom,
     setReady,
+    startGame,
     leaveRoom,
   };
 }

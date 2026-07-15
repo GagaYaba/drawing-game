@@ -1,11 +1,20 @@
 import { ConnectionPanel } from "./components/ConnectionPanel";
+import { DrawingScreen } from "./components/DrawingScreen";
 import { HealthCheck } from "./components/HealthCheck";
 import { HomeScreen } from "./components/HomeScreen";
 import { LobbyScreen } from "./components/LobbyScreen";
+import { RoundIntroScreen } from "./components/RoundIntroScreen";
 import { useRoomSession } from "./hooks/useRoomSession";
 
 export function App() {
   const roomSession = useRoomSession();
+  const room = roomSession.session.room;
+  const currentPlayerId = roomSession.session.currentPlayerId;
+  const game = room?.game ?? null;
+  const currentPlayerSecret =
+    game !== null && game.currentDrawer.id === currentPlayerId
+      ? roomSession.gameSecrets.secretLevel
+      : null;
 
   return (
     <main className="app-shell">
@@ -20,7 +29,7 @@ export function App() {
         </p>
       </header>
 
-      {roomSession.session.room === null ? (
+      {room === null ? (
         <HomeScreen
           nickname={roomSession.nickname}
           roomCode={roomSession.roomCode}
@@ -31,13 +40,33 @@ export function App() {
           onCreateRoom={roomSession.createRoom}
           onJoinRoom={roomSession.joinRoom}
         />
-      ) : (
+      ) : game === null || game.phase === "LOBBY" ? (
         <LobbyScreen
-          room={roomSession.session.room}
-          currentPlayerId={roomSession.session.currentPlayerId}
+          room={room}
+          currentPlayerId={currentPlayerId}
           pendingAction={roomSession.pendingAction}
           errorMessage={roomSession.errorMessage}
+          noticeMessage={roomSession.noticeMessage}
           onSetReady={roomSession.setReady}
+          onStartGame={roomSession.startGame}
+          onLeaveRoom={roomSession.leaveRoom}
+        />
+      ) : game.phase === "ROUND_INTRO" ? (
+        <RoundIntroScreen
+          game={game}
+          currentPlayerId={currentPlayerId}
+          secretLevel={currentPlayerSecret}
+          pendingAction={roomSession.pendingAction}
+          errorMessage={roomSession.errorMessage}
+          onLeaveRoom={roomSession.leaveRoom}
+        />
+      ) : (
+        <DrawingScreen
+          game={game}
+          currentPlayerId={currentPlayerId}
+          secretLevel={currentPlayerSecret}
+          pendingAction={roomSession.pendingAction}
+          errorMessage={roomSession.errorMessage}
           onLeaveRoom={roomSession.leaveRoom}
         />
       )}

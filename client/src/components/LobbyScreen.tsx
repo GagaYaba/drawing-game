@@ -9,7 +9,9 @@ interface LobbyScreenProps {
   currentPlayerId: string | null;
   pendingAction: PendingRoomAction;
   errorMessage: string | null;
+  noticeMessage: string | null;
   onSetReady: (isReady: boolean) => void;
+  onStartGame: () => void;
   onLeaveRoom: () => void;
 }
 
@@ -47,7 +49,9 @@ export function LobbyScreen({
   currentPlayerId,
   pendingAction,
   errorMessage,
+  noticeMessage,
   onSetReady,
+  onStartGame,
   onLeaveRoom,
 }: LobbyScreenProps) {
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
@@ -55,6 +59,7 @@ export function LobbyScreen({
   const currentPlayer = room.players.find(
     (player) => player.id === currentPlayerId,
   );
+  const isHost = currentPlayer?.isHost === true;
   const isPending = pendingAction !== null;
 
   useEffect(
@@ -94,7 +99,7 @@ export function LobbyScreen({
   };
 
   const readinessMessage = room.canStart
-    ? "Tout le monde est prêt. La partie pourra être lancée à l’étape suivante."
+    ? "Tout le monde est prêt. L’hôte peut lancer la partie."
     : room.playerCount < room.minimumPlayersToStart
       ? `Il faut au moins ${room.minimumPlayersToStart} joueurs et tout le monde doit être prêt.`
       : "Le nombre de joueurs est suffisant. Tout le monde doit encore être prêt.";
@@ -137,6 +142,16 @@ export function LobbyScreen({
         {copyFeedback ?? "Partagez le code ou le lien pour inviter votre groupe."}
       </p>
 
+      {noticeMessage !== null && (
+        <p
+          className="form-message form-message--info"
+          role="status"
+          aria-live="polite"
+        >
+          {noticeMessage}
+        </p>
+      )}
+
       {errorMessage !== null && (
         <p className="form-message form-message--error" role="alert">
           {errorMessage}
@@ -177,24 +192,44 @@ export function LobbyScreen({
           </span>
           <div>
             <h3 id="readiness-title">Préparation de la partie</h3>
-            <p>{readinessMessage}</p>
+            <p id="readiness-description">{readinessMessage}</p>
           </div>
         </aside>
       </div>
 
       <div className="lobby-actions">
-        <button
-          className={`button ${currentPlayer?.isReady ? "button--secondary" : "button--primary"}`}
-          type="button"
-          onClick={() => onSetReady(!(currentPlayer?.isReady ?? false))}
-          disabled={isPending || currentPlayer === undefined}
-        >
-          {pendingAction === "ready"
-            ? "Mise à jour…"
-            : currentPlayer?.isReady
-              ? "Je ne suis plus prêt"
-              : "Je suis prêt"}
-        </button>
+        <div className="lobby-primary-actions">
+          <button
+            className={`button ${currentPlayer?.isReady ? "button--secondary" : "button--primary"}`}
+            type="button"
+            onClick={() => onSetReady(!(currentPlayer?.isReady ?? false))}
+            disabled={isPending || currentPlayer === undefined}
+          >
+            {pendingAction === "ready"
+              ? "Mise à jour…"
+              : currentPlayer?.isReady
+                ? "Je ne suis plus prêt"
+                : "Je suis prêt"}
+          </button>
+
+          {isHost ? (
+            <button
+              className="button button--primary"
+              type="button"
+              onClick={onStartGame}
+              disabled={isPending || !room.canStart}
+              aria-describedby="readiness-description"
+            >
+              {pendingAction === "start"
+                ? "Lancement…"
+                : "Lancer la partie"}
+            </button>
+          ) : (
+            <p className="host-start-message">
+              L’hôte lancera la partie lorsque tout le monde sera prêt.
+            </p>
+          )}
+        </div>
         <button
           className="button button--danger-ghost"
           type="button"
@@ -209,9 +244,11 @@ export function LobbyScreen({
         <p className="visually-hidden" role="status" aria-live="polite">
           {pendingAction === "ready"
             ? "Mise à jour de votre statut en cours."
-            : pendingAction === "leave"
-              ? "Départ du salon en cours."
-              : "Action en cours."}
+            : pendingAction === "start"
+              ? "Lancement de la partie en cours."
+              : pendingAction === "leave"
+                ? "Départ du salon en cours."
+                : "Action en cours."}
         </p>
       )}
     </section>

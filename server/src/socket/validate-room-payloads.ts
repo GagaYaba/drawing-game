@@ -79,3 +79,19 @@ export function validateSetPlayerReadyPayload(
 
   return { success: true, data: { isReady: payload.isReady } };
 }
+
+export function validateStartGamePayload(
+  payload: unknown,
+): PayloadValidationResult<null> {
+  if (payload !== undefined) {
+    return {
+      success: false,
+      error: {
+        code: "INVALID_GAME_START_REQUEST",
+        message: "La demande de lancement ne doit contenir aucune donnée.",
+      },
+    };
+  }
+
+  return { success: true, data: null };
+}

@@ -7,14 +7,17 @@ import {
   type PublicRoomState,
   type RoomSessionData,
   type ServerToClientEvents,
+  type StartGameSuccessData,
 } from "@drawing-game/shared";
 import type { Server } from "socket.io";
 
+import { GameManager } from "../game/game-manager.js";
 import { RoomManager, RoomManagerError } from "../rooms/room-manager.js";
 import {
   validateCreateRoomPayload,
   validateJoinRoomPayload,
   validateSetPlayerReadyPayload,
+  validateStartGamePayload,
 } from "./validate-room-payloads.js";
 
 type DrawingGameIo = Server<ClientToServerEvents, ServerToClientEvents>;
@@ -30,22 +33,23 @@ function isActionAcknowledgement<T>(
   return typeof value === "function";
 }
 
-function getActionRequest<T>(
-  payloadOrAcknowledgement: unknown,
-  possibleAcknowledgement: unknown,
-): ActionRequest<T> | null {
-  if (isActionAcknowledgement<T>(possibleAcknowledgement)) {
-    return {
-      payload: payloadOrAcknowledgement,
-      acknowledge: possibleAcknowledgement,
-    };
+function getActionRequest<T>(argumentsReceived: unknown[]): ActionRequest<T> | null {
+  const possibleAcknowledgement = argumentsReceived.at(-1);
+
+  if (!isActionAcknowledgement<T>(possibleAcknowledgement)) {
+    return null;
   }
 
-  if (isActionAcknowledgement<T>(payloadOrAcknowledgement)) {
-    return { payload: undefined, acknowledge: payloadOrAcknowledgement };
-  }
-
-  return null;
+  const payloadArguments = argumentsReceived.slice(0, -1);
+  return {
+    payload:
+      payloadArguments.length === 0
+        ? undefined
+        : payloadArguments.length === 1
+          ? payloadArguments[0]
+          : payloadArguments,
+    acknowledge: possibleAcknowledgement,
+  };
 }
 
 function isClientPingPayload(payload: unknown): payload is ClientPingPayload {
@@ -76,7 +80,11 @@ function actionFailure<T>(error: unknown): ActionResult<T> {
   };
 }
 
-export function registerSocketHandlers(io: DrawingGameIo, roomManager: RoomManager) {
+export function registerSocketHandlers(
+  io: DrawingGameIo,
+  roomManager: RoomManager,
+  gameManager: GameManager,
+) {
   io.on("connection", (socket) => {
     console.info(`[socket] Client connected: ${socket.id}`);
 
@@ -91,8 +99,8 @@ export function registerSocketHandlers(io: DrawingGameIo, roomManager: RoomManag
       });
     });
 
-    socket.on(SOCKET_EVENTS.ROOM_CREATE, async (payload, acknowledge) => {
-      const request = getActionRequest<RoomSessionData>(payload, acknowledge);
+    socket.on(SOCKET_EVENTS.ROOM_CREATE, async (...argumentsReceived: unknown[]) => {
+      const request = getActionRequest<RoomSessionData>(argumentsReceived);
       if (request === null) {
         return;
       }
@@ -123,8 +131,8 @@ export function registerSocketHandlers(io: DrawingGameIo, roomManager: RoomManag
       io.to(session.roomCode).emit(SOCKET_EVENTS.ROOM_STATE, session.room);
     });
 
-    socket.on(SOCKET_EVENTS.ROOM_JOIN, async (payload, acknowledge) => {
-      const request = getActionRequest<RoomSessionData>(payload, acknowledge);
+    socket.on(SOCKET_EVENTS.ROOM_JOIN, async (...argumentsReceived: unknown[]) => {
+      const request = getActionRequest<RoomSessionData>(argumentsReceived);
       if (request === null) {
         return;
       }
@@ -159,24 +167,29 @@ export function registerSocketHandlers(io: DrawingGameIo, roomManager: RoomManag
       io.to(session.roomCode).emit(SOCKET_EVENTS.ROOM_STATE, session.room);
     });
 
-    socket.on(SOCKET_EVENTS.ROOM_LEAVE, async (
-      payloadOrAcknowledgement: unknown,
-      possibleAcknowledgement?: unknown,
-    ) => {
-      const request = getActionRequest<null>(
-        payloadOrAcknowledgement,
-        possibleAcknowledgement,
-      );
+    socket.on(SOCKET_EVENTS.ROOM_LEAVE, async (...argumentsReceived: unknown[]) => {
+      const request = getActionRequest<null>(argumentsReceived);
       if (request === null) {
         return;
       }
 
       try {
+        const currentRoom = roomManager.getPlayerRoomBySocketId(socket.id);
+        const gameWasCancelled =
+          currentRoom === undefined
+            ? false
+            : gameManager.cancelGame(currentRoom.code);
         const departure = roomManager.leaveRoom(socket.id);
         await socket.leave(departure.roomCode);
         request.acknowledge({ success: true, data: null });
 
         if (departure.room !== null) {
+          if (gameWasCancelled) {
+            io.to(departure.roomCode).emit(SOCKET_EVENTS.GAME_CANCELLED, {
+              reason: "PLAYER_LEFT",
+              message: "La partie a été annulée car un joueur a quitté le salon.",
+            });
+          }
           io.to(departure.roomCode).emit(
             SOCKET_EVENTS.ROOM_STATE,
             departure.room,
@@ -189,11 +202,8 @@ export function registerSocketHandlers(io: DrawingGameIo, roomManager: RoomManag
 
     socket.on(
       SOCKET_EVENTS.PLAYER_SET_READY,
-      (payload, acknowledge) => {
-        const request = getActionRequest<PublicRoomState>(
-          payload,
-          acknowledge,
-        );
+      (...argumentsReceived: unknown[]) => {
+        const request = getActionRequest<PublicRoomState>(argumentsReceived);
         if (request === null) {
           return;
         }
@@ -220,10 +230,55 @@ export function registerSocketHandlers(io: DrawingGameIo, roomManager: RoomManag
       },
     );
 
+    socket.on(SOCKET_EVENTS.GAME_START, (...argumentsReceived: unknown[]) => {
+      const request = getActionRequest<StartGameSuccessData>(
+        argumentsReceived,
+      );
+      if (request === null) {
+        return;
+      }
+
+      const validation = validateStartGamePayload(request.payload);
+      if (!validation.success) {
+        request.acknowledge(validation);
+        return;
+      }
+
+      try {
+        const startedGame = gameManager.startGame(socket.id);
+        io.to(startedGame.room.code).emit(
+          SOCKET_EVENTS.ROOM_STATE,
+          startedGame.room,
+        );
+        io.to(startedGame.drawerSocketId).emit(
+          SOCKET_EVENTS.TURN_SECRET,
+          startedGame.secret,
+        );
+        request.acknowledge({
+          success: true,
+          data: { room: startedGame.room },
+        });
+      } catch (error) {
+        request.acknowledge(actionFailure(error));
+      }
+    });
+
     socket.on("disconnect", (reason) => {
+      const currentRoom = roomManager.getPlayerRoomBySocketId(socket.id);
+      const gameWasCancelled =
+        currentRoom === undefined
+          ? false
+          : gameManager.cancelGame(currentRoom.code);
       const departure = roomManager.handleSocketDisconnect(socket.id);
 
       if (departure !== null && departure.room !== null) {
+        if (gameWasCancelled) {
+          io.to(departure.roomCode).emit(SOCKET_EVENTS.GAME_CANCELLED, {
+            reason: "PLAYER_DISCONNECTED",
+            message:
+              "La partie a été annulée car un joueur s’est déconnecté.",
+          });
+        }
         io.to(departure.roomCode).emit(
           SOCKET_EVENTS.ROOM_STATE,
           departure.room,

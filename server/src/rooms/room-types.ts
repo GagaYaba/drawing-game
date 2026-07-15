@@ -3,6 +3,7 @@ import type {
   RoomErrorCode,
   RoomSessionData,
 } from "@drawing-game/shared";
+import type { InternalGame } from "../game/game-types.js";
 
 export type { RoomErrorCode } from "@drawing-game/shared";
 
@@ -19,6 +20,7 @@ export interface InternalRoom {
   code: string;
   players: InternalPlayer[];
   createdAt: number;
+  game: InternalGame | null;
 }
 
 export type RoomCodeGenerator = () => string;

@@ -8,15 +8,19 @@ import type {
   HealthResponse,
   ServerToClientEvents,
 } from "@drawing-game/shared";
+import { SOCKET_EVENTS } from "@drawing-game/shared";
 import express from "express";
 import { Server } from "socket.io";
 
+import { GameManager } from "./game/game-manager.js";
+import type { GameManagerOptions } from "./game/game-types.js";
 import { RoomManager } from "./rooms/room-manager.js";
 import { registerSocketHandlers } from "./socket/register-socket-handlers.js";
 
 export interface CreateDrawingGameServerOptions {
   serveClient?: boolean;
   roomManager?: RoomManager;
+  gameManagerOptions?: GameManagerOptions;
 }
 
 export function createDrawingGameServer(
@@ -26,6 +30,15 @@ export function createDrawingGameServer(
   const httpServer = createServer(app);
   const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer);
   const roomManager = options.roomManager ?? new RoomManager();
+  const externalRoomStateListener =
+    options.gameManagerOptions?.onPublicRoomStateChanged;
+  const gameManager = new GameManager(roomManager, {
+    ...options.gameManagerOptions,
+    onPublicRoomStateChanged: (roomCode, room) => {
+      externalRoomStateListener?.(roomCode, room);
+      io.to(roomCode).emit(SOCKET_EVENTS.ROOM_STATE, room);
+    },
+  });
 
   app.get("/api/health", (_request, response) => {
     const health: HealthResponse = {
@@ -40,7 +53,8 @@ export function createDrawingGameServer(
     response.status(404).json({ error: "API route not found" });
   });
 
-  registerSocketHandlers(io, roomManager);
+  registerSocketHandlers(io, roomManager, gameManager);
+  httpServer.once("close", () => gameManager.dispose());
 
   if (options.serveClient !== false) {
     const currentDirectory = dirname(fileURLToPath(import.meta.url));
@@ -69,5 +83,5 @@ export function createDrawingGameServer(
     }
   }
 
-  return { app, httpServer, io, roomManager };
+  return { app, httpServer, io, roomManager, gameManager };
 }
