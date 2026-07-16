@@ -19,7 +19,10 @@ const STARTED_AT = 20_000;
 const SUBMITTED_AT = 25_000;
 const TEST_PROMPT = {
   id: "drawing-test-prompt",
-  text: "Un monstre plus ou moins effrayant",
+  statement:
+    "Représente un monstre du plus effrayant (10) au moins effrayant (1).",
+  lowLabel: "Moins effrayant",
+  highLabel: "Plus effrayant",
   category: "test",
 } as const;
 

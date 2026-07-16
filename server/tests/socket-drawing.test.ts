@@ -48,7 +48,10 @@ const INTRO_DURATION_MS = 500;
 const SECRET_LEVEL = 7;
 const TEST_PROMPT = {
   id: "drawing-integration-prompt",
-  text: "Un phare plus ou moins lumineux",
+  statement:
+    "Représente un phare du plus lumineux (10) au moins lumineux (1).",
+  lowLabel: "Moins lumineux",
+  highLabel: "Plus lumineux",
   category: "integration",
 } as const;
 

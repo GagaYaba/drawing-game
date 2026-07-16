@@ -2,6 +2,7 @@ import type { PublicGameState } from "@drawing-game/shared";
 
 import type { PendingRoomAction } from "../hooks/useRoomSession";
 import { DrawingPreview } from "./drawing/DrawingPreview";
+import { ScaleGauge } from "./scale/ScaleGauge";
 
 interface VotingScreenProps {
   game: PublicGameState;
@@ -63,10 +64,28 @@ export function VotingScreen({
         </p>
       )}
 
-      <section className="prompt-card" aria-labelledby="voting-prompt-title">
-        <p className="card-label">Consigne publique</p>
-        <h3 id="voting-prompt-title">Consigne</h3>
-        <p className="prompt-text">{game.prompt.text}</p>
+      <section className="phase-primary-card phase-primary-card--compact" aria-labelledby="voting-prompt-title">
+        <div className="phase-prompt">
+          <p className="card-label">Consigne du tour</p>
+          <h3 id="voting-prompt-title">À représenter</h3>
+          <p className="prompt-text">{game.prompt.statement}</p>
+        </div>
+
+        {isDrawer && secretLevel !== null ? (
+          <ScaleGauge
+            lowLabel={game.prompt.lowLabel}
+            highLabel={game.prompt.highLabel}
+            value={secretLevel}
+            showValueText
+            size="compact"
+          />
+        ) : (
+          <ScaleGauge
+            lowLabel={game.prompt.lowLabel}
+            highLabel={game.prompt.highLabel}
+            size="compact"
+          />
+        )}
       </section>
 
       <div className="voting-content">
@@ -78,32 +97,26 @@ export function VotingScreen({
         ) : (
           <DrawingPreview
             drawing={game.submittedDrawing.document}
-            description={`Dessin soumis par ${game.currentDrawer.nickname} pour la consigne « ${game.prompt.text} ».`}
+            description={`Dessin soumis par ${game.currentDrawer.nickname} pour la consigne « ${game.prompt.statement} ».`}
           />
         )}
 
         {isDrawer ? (
           <aside className="secret-card voting-message" aria-labelledby="drawer-vote-title">
-            <p className="card-label">Votre rôle</p>
-            <h3 id="drawer-vote-title">Le groupe va bientôt observer</h3>
-            <p>Les autres joueurs devront bientôt deviner votre niveau.</p>
-            {secretLevel !== null && (
-              <p
-                className="secret-level secret-level--compact"
-                aria-label={`Votre niveau secret : ${secretLevel} sur 10`}
-              >
-                <strong>{secretLevel}</strong>
-                <span>/ 10</span>
-              </p>
-            )}
+            <p className="card-label">Prochaine étape</p>
+            <h3 id="drawer-vote-title">Le groupe votera bientôt</h3>
+            <p>
+              Votre niveau reste privé. Les autres joueurs devront bientôt
+              estimer ce que votre dessin représente.
+            </p>
           </aside>
         ) : (
           <aside className="waiting-card voting-message" aria-labelledby="observer-vote-title">
             <p className="card-label">Prochaine étape</p>
             <h3 id="observer-vote-title">Le vote arrive bientôt</h3>
             <p>
-              À la prochaine étape, vous devrez deviner le niveau représenté.
-              Aucun contrôle de vote n’est encore disponible.
+              Vous devrez bientôt estimer le niveau représenté. Aucun contrôle
+              de vote n’est encore disponible.
             </p>
           </aside>
         )}

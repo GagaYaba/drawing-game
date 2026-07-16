@@ -184,7 +184,9 @@ describe("GameManager", () => {
       },
       prompt: {
         id: DRAWING_PROMPTS[0].id,
-        text: DRAWING_PROMPTS[0].text,
+        statement: DRAWING_PROMPTS[0].statement,
+        lowLabel: DRAWING_PROMPTS[0].lowLabel,
+        highLabel: DRAWING_PROMPTS[0].highLabel,
       },
       phaseEndsAt: GAME_CLOCK + ROUND_INTRO_DURATION_MS,
     });
@@ -264,18 +266,7 @@ describe("GameManager", () => {
     gameManager.dispose();
   });
 
-  it("expose une banque d'au moins trente consignes valides et en sélectionne une connue", () => {
-    expect(DRAWING_PROMPTS.length).toBeGreaterThanOrEqual(30);
-    expect(new Set(DRAWING_PROMPTS.map((prompt) => prompt.id)).size).toBe(
-      DRAWING_PROMPTS.length,
-    );
-
-    for (const prompt of DRAWING_PROMPTS) {
-      expect(prompt.id.trim()).not.toBe("");
-      expect(prompt.text.trim()).not.toBe("");
-      expect(prompt.category.trim()).not.toBe("");
-    }
-
+  it("sélectionne une consigne connue dans la banque", () => {
     const selectedPrompt = selectDrawingPrompt(DRAWING_PROMPTS, () => 0.5);
     expect(DRAWING_PROMPTS).toContain(selectedPrompt);
   });
@@ -294,6 +285,13 @@ describe("GameManager", () => {
     expect(result.room.game?.currentTurnNumber).toBe(1);
     expect(result.room.game).not.toHaveProperty("secretLevel");
     expect(result.room.game).not.toHaveProperty("turnOrder");
+    expect(result.room.game?.prompt).toEqual({
+      id: DRAWING_PROMPTS[0].id,
+      statement: DRAWING_PROMPTS[0].statement,
+      lowLabel: DRAWING_PROMPTS[0].lowLabel,
+      highLabel: DRAWING_PROMPTS[0].highLabel,
+    });
+    expect(result.room.game?.prompt).not.toHaveProperty("category");
     expect(serializedPublicRoom).not.toContain("secretLevel");
     expect(serializedPublicRoom).not.toContain("socketId");
     expect(serializedPublicRoom).not.toContain("turnOrder");

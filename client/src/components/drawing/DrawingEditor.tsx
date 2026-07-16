@@ -126,19 +126,6 @@ export function DrawingEditor({
         <p>{strokes.length} trait{strokes.length > 1 ? "s" : ""}</p>
       </div>
 
-      <DrawingToolbar
-        selectedTool={selectedTool}
-        selectedColor={selectedColor}
-        selectedWidth={selectedWidth}
-        canUndo={strokes.length > 0}
-        disabled={disabled || isStrokeActive}
-        onToolChange={setSelectedTool}
-        onColorChange={handleColorChange}
-        onWidthChange={setSelectedWidth}
-        onUndo={handleUndo}
-        onClear={handleClear}
-      />
-
       <p id="drawing-canvas-help" className="drawing-canvas-help">
         Dessinez avec la souris, le doigt ou un stylet. Le dessin reste dans ce
         navigateur jusqu’à sa validation.
@@ -155,6 +142,19 @@ export function DrawingEditor({
         onStrokeComplete={handleStrokeComplete}
         onStrokeActiveChange={setIsStrokeActive}
         onLimitReached={handleLimitReached}
+      />
+
+      <DrawingToolbar
+        selectedTool={selectedTool}
+        selectedColor={selectedColor}
+        selectedWidth={selectedWidth}
+        canUndo={strokes.length > 0}
+        disabled={disabled || isStrokeActive}
+        onToolChange={setSelectedTool}
+        onColorChange={handleColorChange}
+        onWidthChange={setSelectedWidth}
+        onUndo={handleUndo}
+        onClear={handleClear}
       />
 
       {limitMessage !== null && (

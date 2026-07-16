@@ -10,7 +10,7 @@ Application multijoueur de dessin en temps réel. Cette version permet de créer
 - statut `Prêt` ou `Pas prêt` modifiable par chaque joueur ;
 - lancement réservé à l'hôte à partir de 3 joueurs lorsque tout le monde est prêt ;
 - phases de partie `LOBBY`, `ROUND_INTRO`, `DRAWING` et `VOTING`, pilotées par le serveur ;
-- affichage de la consigne publique et envoi d'un niveau secret uniquement au dessinateur courant ;
+- affichage d’une consigne publique structurée et de sa jauge de 1 à 10 dans les trois phases, avec repère privé uniquement pour le dessinateur courant ;
 - structure de partie prévue pour 2 manches, avec uniquement le premier tour exécuté dans cette version ;
 - canvas vectoriel 4:3 compatible souris, tactile et stylet, avec crayon, gomme, palette, épaisseurs, annulation et effacement ;
 - soumission autorisée uniquement au dessinateur courant et aperçu synchronisé du dessin en phase `VOTING` ;
@@ -116,6 +116,28 @@ La partie est structurée pour **2 manches**, mais cette version s'arrête à la
 
 Le niveau secret est transmis avec l'événement privé `turn:secret` au seul socket du dessinateur. Il ne fait pas partie de l'état public du salon ni des diffusions destinées aux autres joueurs.
 
+## Consignes structurées et jauge de niveau
+
+Chaque consigne est désormais un objet structuré contenant :
+
+```ts
+interface DrawingPrompt {
+  id: string;
+  statement: string;
+  lowLabel: string;
+  highLabel: string;
+  category: string;
+}
+```
+
+La phrase complète indique toujours le sujet à représenter, puis l’extrême correspondant au niveau **10** avant celui du niveau **1**. Par exemple : `Représente une fée de la plus puissante (10) à la moins puissante (1).` Les formulations vagues telles que « plus ou moins » ne sont plus admises. Les libellés `lowLabel` et `highLabel` sont transmis séparément dans l’état public afin que le frontend n’ait jamais à analyser la phrase.
+
+Les phases `ROUND_INTRO`, `DRAWING` et `VOTING` affichent une jauge horizontale informative composée de dix segments colorés, des graduations de 1 à 10 et des deux libellés d’extrémité. Le composant React `ScaleGauge` est un composant de présentation réutilisable, responsive et accessible. Il n’est pas interactif dans cette version : aucun curseur ni envoi de vote n’a encore été ajouté.
+
+Le repère triangulaire et le texte `Niveau secret : X / 10` ne sont rendus que lorsque le client du dessinateur fournit sa valeur privée au composant. Les autres joueurs reçoivent la consigne et voient la même jauge sans valeur, sans repère et sans nombre secret dans le DOM. Le niveau continue d’être envoyé uniquement par l’événement privé `turn:secret` et ne fait jamais partie de `PublicGameState` ou de `room:state`.
+
+La jauge est conçue pour accueillir plus tard une sélection, plusieurs estimations et la bonne réponse pendant le vote et la révélation, mais aucune de ces fonctionnalités n’est implémentée ici. Les tests automatisés parcourent toute la banque de consignes, vérifient sa projection publique et la confidentialité du secret, puis couvrent les dix segments, les graduations, les positions 1, 5 et 10, les valeurs invalides et l’affichage conditionnel du texte privé.
+
 ## Dessin vectoriel
 
 Le client conserve le dessin en mémoire sous forme de traits vectoriels plutôt que d'image bitmap. Les coordonnées sont normalisées entre `0` et `1`, indépendamment de la taille d'affichage et de la densité de pixels de l'écran. Le canvas logique est au format **4:3** (`1200 × 900`) et adapte son buffer au `devicePixelRatio`.
@@ -183,6 +205,8 @@ npm test
 ```
 
 Cette commande lance les tests Vitest : tests unitaires de la logique des salons, de la partie, du document vectoriel et de sa géométrie, ainsi que des tests d'intégration avec un serveur sur un port éphémère et de vrais clients Socket.IO. Ils couvrent notamment la capacité maximale, la validation stricte du dessin, les autorisations de soumission, les transitions de phase, la confidentialité du niveau secret, l'annulation sur départ ou déconnexion et l'isolation entre salons.
+
+La suite actuelle contient **171 tests**. Les contrôles ajoutés parcourent les 36 consignes, vérifient leur projection publique, testent le calcul et le rendu de `ScaleGauge`, puis rendent les trois écrans côté serveur pour confirmer qu’un observateur ne reçoit ni repère ni texte secret.
 
 ## Build et lancement en production
 

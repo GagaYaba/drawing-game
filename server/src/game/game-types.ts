@@ -1,13 +1,12 @@
 import type {
   DrawingDocument,
   GamePhase,
+  PublicGamePrompt,
   PublicRoomState,
   TurnSecretPayload,
 } from "@drawing-game/shared";
 
-export interface DrawingPrompt {
-  id: string;
-  text: string;
+export interface DrawingPrompt extends PublicGamePrompt {
   category: string;
 }
 

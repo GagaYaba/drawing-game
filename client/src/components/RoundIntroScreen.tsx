@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import type { PublicGameState } from "@drawing-game/shared";
 
 import type { PendingRoomAction } from "../hooks/useRoomSession";
+import { ScaleGauge } from "./scale/ScaleGauge";
 
 interface RoundIntroScreenProps {
   game: PublicGameState;
@@ -66,26 +67,7 @@ export function RoundIntroScreen({
       aria-labelledby="round-intro-title"
       aria-busy={isPending}
     >
-      <header className="phase-heading">
-        <div>
-          <p className="eyebrow">Présentation du tour</p>
-          <h2 id="round-intro-title">
-            {isDrawer
-              ? "C’est à vous de dessiner"
-              : `${game.currentDrawer.nickname} va dessiner`}
-          </h2>
-        </div>
-        <p
-          className="countdown"
-          role="status"
-          aria-live="polite"
-          aria-atomic="true"
-        >
-          {countdownMessage}
-        </p>
-      </header>
-
-      <ul className="phase-meta" aria-label="Progression de la partie">
+      <ul className="phase-meta phase-meta--prominent" aria-label="Progression de la partie">
         <li>
           <span>Manche</span>
           <strong>
@@ -104,49 +86,62 @@ export function RoundIntroScreen({
         </li>
       </ul>
 
+      <header className="phase-heading phase-heading--stacked">
+        <div>
+          <p className="eyebrow">Présentation du tour</p>
+          <h2 id="round-intro-title">
+            {isDrawer
+              ? "C’est à vous de dessiner"
+              : `${game.currentDrawer.nickname} va dessiner`}
+          </h2>
+        </div>
+        {!isDrawer && (
+          <p className="phase-role-note">Son niveau reste secret.</p>
+        )}
+      </header>
+
       {errorMessage !== null && (
         <p className="form-message form-message--error" role="alert">
           {errorMessage}
         </p>
       )}
 
-      <div className="phase-content">
-        <section className="prompt-card" aria-labelledby="intro-prompt-title">
-          <p className="card-label">Consigne publique</p>
-          <h3 id="intro-prompt-title">Consigne</h3>
-          <p className="prompt-text">{game.prompt.text}</p>
-        </section>
+      <section className="phase-primary-card" aria-labelledby="intro-prompt-title">
+        <div className="phase-prompt">
+          <p className="card-label">Consigne du tour</p>
+          <h3 id="intro-prompt-title">À représenter</h3>
+          <p className="prompt-text">{game.prompt.statement}</p>
+        </div>
 
-        {isDrawer ? (
-          <aside className="secret-card" aria-labelledby="secret-level-title">
-            <p className="card-label">Information privée</p>
-            <h3 id="secret-level-title">Votre niveau secret</h3>
-            {secretLevel === null ? (
-              <p role="status" aria-live="polite">
-                Réception de votre niveau secret…
-              </p>
-            ) : (
-              <p
-                className="secret-level"
-                aria-label={`Votre niveau secret : ${secretLevel} sur 10`}
-              >
-                <strong>{secretLevel}</strong>
-                <span>/ 10</span>
-              </p>
-            )}
-            <p>Gardez ce nombre pour vous et représentez-le dans votre dessin.</p>
-          </aside>
+        {isDrawer && secretLevel !== null ? (
+          <ScaleGauge
+            lowLabel={game.prompt.lowLabel}
+            highLabel={game.prompt.highLabel}
+            value={secretLevel}
+            showValueText
+          />
         ) : (
-          <aside className="waiting-card" aria-labelledby="observer-role-title">
-            <p className="card-label">Votre rôle</p>
-            <h3 id="observer-role-title">Observez bien</h3>
-            <p>
-              Essayez ensuite de deviner le niveau secret représenté par le
-              dessin.
-            </p>
-          </aside>
+          <ScaleGauge
+            lowLabel={game.prompt.lowLabel}
+            highLabel={game.prompt.highLabel}
+          />
         )}
-      </div>
+
+        {isDrawer && secretLevel === null && (
+          <p className="private-level-loading" role="status" aria-live="polite">
+            Réception de votre niveau secret…
+          </p>
+        )}
+      </section>
+
+      <p
+        className="countdown countdown--wide"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        {countdownMessage}
+      </p>
 
       <div className="game-actions">
         <p id="round-leave-warning">

@@ -5,6 +5,7 @@ import type {
 
 import type { PendingRoomAction } from "../hooks/useRoomSession";
 import { DrawingEditor } from "./drawing/DrawingEditor";
+import { ScaleGauge } from "./scale/ScaleGauge";
 
 interface DrawingScreenProps {
   game: PublicGameState;
@@ -71,33 +72,39 @@ export function DrawingScreen({
         </p>
       )}
 
-      <section className="prompt-card" aria-labelledby="drawing-prompt-title">
-        <p className="card-label">Consigne publique</p>
-        <h3 id="drawing-prompt-title">Consigne</h3>
-        <p className="prompt-text">{game.prompt.text}</p>
+      <section className="phase-primary-card phase-primary-card--compact" aria-labelledby="drawing-prompt-title">
+        <div className="phase-prompt">
+          <p className="card-label">Consigne du tour</p>
+          <h3 id="drawing-prompt-title">À représenter</h3>
+          <p className="prompt-text">{game.prompt.statement}</p>
+        </div>
+
+        {isDrawer && secretLevel !== null ? (
+          <ScaleGauge
+            lowLabel={game.prompt.lowLabel}
+            highLabel={game.prompt.highLabel}
+            value={secretLevel}
+            showValueText
+            valueTextLabel="Niveau à représenter"
+            size="compact"
+          />
+        ) : (
+          <ScaleGauge
+            lowLabel={game.prompt.lowLabel}
+            highLabel={game.prompt.highLabel}
+            size="compact"
+          />
+        )}
+
+        {isDrawer && secretLevel === null && (
+          <p className="private-level-loading" role="status" aria-live="polite">
+            Réception de votre niveau secret…
+          </p>
+        )}
       </section>
 
       {isDrawer ? (
-        <div className="drawer-area">
-          <aside className="secret-card" aria-labelledby="drawing-level-title">
-            <p className="card-label">Information privée</p>
-            <h3 id="drawing-level-title">Niveau à représenter</h3>
-            {secretLevel === null ? (
-              <p role="status" aria-live="polite">
-                Réception de votre niveau secret…
-              </p>
-            ) : (
-              <p
-                className="secret-level"
-                aria-label={`Niveau à représenter : ${secretLevel} sur 10`}
-              >
-                <strong>{secretLevel}</strong>
-                <span>/ 10</span>
-              </p>
-            )}
-            <p>Gardez ce nombre visible pendant toute la création.</p>
-          </aside>
-
+        <div className="drawer-area drawer-area--single">
           <DrawingEditor
             disabled={isPending || secretLevel === null}
             isSubmitting={isSubmitting}
@@ -114,8 +121,8 @@ export function DrawingScreen({
             {game.currentDrawer.nickname} dessine en ce moment
           </h3>
           <p>
-            La consigne est visible par tous, mais son niveau reste secret. Le
-            dessin apparaîtra seulement après sa validation.
+            La consigne et son échelle sont visibles par tous, mais le niveau
+            reste secret. Le dessin apparaîtra seulement après sa validation.
           </p>
         </aside>
       )}

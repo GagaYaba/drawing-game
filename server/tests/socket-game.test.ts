@@ -35,7 +35,10 @@ const INTRO_DURATION_MS = 60;
 const SECRET_LEVEL = 7;
 const TEST_PROMPT = {
   id: "integration-prompt",
-  text: "Une montagne sous les étoiles",
+  statement:
+    "Représente une montagne de la plus imposante (10) à la moins imposante (1).",
+  lowLabel: "Moins imposante",
+  highLabel: "Plus imposante",
   category: "integration",
 } as const;
 
@@ -409,7 +412,12 @@ describe("Socket.IO game integration", () => {
         currentRound: 1,
         currentTurnNumber: 1,
         totalTurns: 6,
-        prompt: { id: TEST_PROMPT.id, text: TEST_PROMPT.text },
+        prompt: {
+          id: TEST_PROMPT.id,
+          statement: TEST_PROMPT.statement,
+          lowLabel: TEST_PROMPT.lowLabel,
+          highLabel: TEST_PROMPT.highLabel,
+        },
       });
 
       for (const state of states) {

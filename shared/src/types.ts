@@ -24,6 +24,13 @@ export interface PublicSubmittedDrawing {
   submittedAt: number;
 }
 
+export interface PublicGamePrompt {
+  id: string;
+  statement: string;
+  lowLabel: string;
+  highLabel: string;
+}
+
 export interface PublicGameState {
   phase: GamePhase;
   totalRounds: number;
@@ -34,10 +41,7 @@ export interface PublicGameState {
     id: string;
     nickname: string;
   };
-  prompt: {
-    id: string;
-    text: string;
-  };
+  prompt: PublicGamePrompt;
   phaseEndsAt: number | null;
   submittedDrawing: PublicSubmittedDrawing | null;
 }

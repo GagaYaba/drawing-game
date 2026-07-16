@@ -104,7 +104,9 @@ export function toPublicGameState(
     currentDrawer: { id: drawer.id, nickname: drawer.nickname },
     prompt: {
       id: game.currentTurn.prompt.id,
-      text: game.currentTurn.prompt.text,
+      statement: game.currentTurn.prompt.statement,
+      lowLabel: game.currentTurn.prompt.lowLabel,
+      highLabel: game.currentTurn.prompt.highLabel,
     },
     phaseEndsAt: game.phaseEndsAt,
     submittedDrawing:

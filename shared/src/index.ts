@@ -28,6 +28,7 @@ export type {
   GamePhase,
   HealthResponse,
   JoinRoomPayload,
+  PublicGamePrompt,
   PublicPlayer,
   PublicGameState,
   PublicSubmittedDrawing,
