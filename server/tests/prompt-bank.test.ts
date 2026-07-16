@@ -27,6 +27,7 @@ function createGame(prompt: DrawingPrompt): InternalGame {
       secretLevel: 7,
       drawing: null,
       drawingSubmittedAt: null,
+      guesses: {},
     },
     startedAt: 2_000,
     phaseEndsAt: null,

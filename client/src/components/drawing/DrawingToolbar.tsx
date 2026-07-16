@@ -49,10 +49,14 @@ export function DrawingToolbar({
   onClear,
 }: DrawingToolbarProps) {
   return (
-    <div className="drawing-toolbar" aria-label="Outils de dessin">
+    <div
+      className="drawing-toolbar"
+      role="group"
+      aria-label="Outils de dessin"
+    >
       <fieldset className="toolbar-group">
         <legend>Outil</legend>
-        <div className="toolbar-options">
+        <div className="toolbar-options toolbar-options--tools">
           <button
             className="tool-button"
             type="button"
@@ -76,7 +80,7 @@ export function DrawingToolbar({
 
       <fieldset className="toolbar-group toolbar-group--colors">
         <legend>Couleur</legend>
-        <div className="toolbar-options toolbar-color-options">
+        <div className="toolbar-options toolbar-options--colors">
           {DRAWING_COLOR_PALETTE.map((color) => {
             const isSelected = selectedColor === color;
             const style = { "--swatch-color": color } as CSSProperties;
@@ -104,7 +108,7 @@ export function DrawingToolbar({
 
       <fieldset className="toolbar-group">
         <legend>Taille</legend>
-        <div className="toolbar-options">
+        <div className="toolbar-options toolbar-options--widths">
           {DRAWING_ALLOWED_STROKE_WIDTHS.map((width) => (
             <button
               key={width}

@@ -1,6 +1,6 @@
 # Drawing Scale Game
 
-Application multijoueur de dessin en temps réel. Cette version permet de créer et rejoindre des salons, de préparer les joueurs dans un lobby, de lancer une partie, de réaliser le premier dessin vectoriel puis de le révéler à tous les joueurs.
+Application multijoueur de dessin en temps réel. Cette version permet de créer et rejoindre des salons, de préparer les joueurs dans un lobby, de lancer une partie, de réaliser le premier dessin vectoriel, de recueillir les estimations privées du groupe puis de révéler le niveau attendu et les écarts.
 
 ## Fonctionnalités actuelles
 
@@ -9,11 +9,14 @@ Application multijoueur de dessin en temps réel. Cette version permet de créer
 - liste des joueurs synchronisée en temps réel, avec identification de l'hôte et du joueur courant ;
 - statut `Prêt` ou `Pas prêt` modifiable par chaque joueur ;
 - lancement réservé à l'hôte à partir de 3 joueurs lorsque tout le monde est prêt ;
-- phases de partie `LOBBY`, `ROUND_INTRO`, `DRAWING` et `VOTING`, pilotées par le serveur ;
-- affichage d’une consigne publique structurée et de sa jauge de 1 à 10 dans les trois phases, avec repère privé uniquement pour le dessinateur courant ;
+- phases de partie `LOBBY`, `ROUND_INTRO`, `DRAWING`, `VOTING` et `REVEAL`, pilotées par le serveur ;
+- affichage d’une consigne publique structurée et de sa jauge de 1 à 10, avec repère privé uniquement pour le dessinateur avant la révélation ;
 - structure de partie prévue pour 2 manches, avec uniquement le premier tour exécuté dans cette version ;
 - canvas vectoriel 4:3 compatible souris, tactile et stylet, avec crayon, gomme, palette, épaisseurs, annulation et effacement ;
 - soumission autorisée uniquement au dessinateur courant et aperçu synchronisé du dessin en phase `VOTING` ;
+- sélection locale d’une estimation de 1 à 10 par chaque non-dessinateur, puis confirmation définitive validée par le serveur ;
+- confidentialité des valeurs pendant `VOTING` : seul le compteur d’estimations reçues est public ;
+- passage automatique à `REVEAL` après le dernier vote requis, avec publication du secret, des estimations et de leur distance absolue ;
 - fermeture du salon aux nouveaux joueurs dès le lancement ;
 - annulation de la partie et retour au lobby si un joueur quitte ou se déconnecte ;
 - départ volontaire ou retrait automatique à la déconnexion, avec transfert du rôle d'hôte au joueur présent depuis le plus longtemps ;
@@ -110,13 +113,20 @@ Le serveur reste la source d'autorité pour les phases et leurs transitions :
 1. `LOBBY` : les joueurs rejoignent le salon, se déclarent prêts et l'hôte lance la partie.
 2. `ROUND_INTRO` : tous voient la manche, le numéro du tour, le dessinateur et la consigne publique. Cette introduction dure environ 3 secondes ; l'interface affiche un compte à rebours dérivé de l'heure de fin envoyée par le serveur, sans changer elle-même de phase.
 3. `DRAWING` : la transition est diffusée par le serveur. Le dessinateur voit la consigne, son niveau secret sur 10 et l'éditeur vectoriel. Les autres joueurs voient la consigne, l'identité du dessinateur et un écran d'attente, mais jamais son niveau secret.
-4. `VOTING` : après confirmation et validation de la soumission, le serveur stocke le dessin, horodate la soumission et diffuse le même aperçu à tout le salon. Aucun vote n'est encore proposé dans cette version.
+4. `VOTING` : après validation du dessin, chaque joueur autre que le dessinateur choisit localement une valeur de 1 à 10, peut la modifier puis la confirme définitivement. Le serveur identifie le votant grâce à son socket, refuse le dessinateur et les doubles votes, et ne publie que la progression globale.
+5. `REVEAL` : le dernier vote valide déclenche cette phase dans la même opération serveur. Le niveau secret, toutes les estimations validées et leur écart absolu deviennent publics. La partie reste sur cet écran : aucun score n'est calculé et aucun tour suivant n'est lancé.
 
-La partie est structurée pour **2 manches**, mais cette version s'arrête à la révélation du premier dessin du premier tour. La rotation du dessinateur, les tours suivants et la fin de partie ne sont pas encore implémentés.
+La partie est structurée pour **2 manches**, mais cette version s'arrête à la révélation du premier dessin du premier tour. La rotation du dessinateur, les tours suivants, le calcul de points et la fin de partie ne sont pas encore implémentés.
 
-Le niveau secret est transmis avec l'événement privé `turn:secret` au seul socket du dessinateur. Il ne fait pas partie de l'état public du salon ni des diffusions destinées aux autres joueurs.
+Le niveau secret est transmis avec l'événement privé `turn:secret` au seul socket du dessinateur. Il ne fait pas partie de l'état public avant `REVEAL`.
 
-## Consignes structurées et jauge de niveau
+### Interface plein écran pendant la partie
+
+Pendant `ROUND_INTRO`, `DRAWING`, `VOTING` et `REVEAL`, l'interface utilise l'espace disponible comme un écran de jeu dédié : le header de marque global est masqué tant qu'une partie est active, la consigne reste compacte et une grande jauge occupe toute la largeur utile juste sous son énoncé. Sur ordinateur, le reste du contenu s'organise autour d'une zone principale et d'une sidebar afin de garder les informations et actions utiles visibles sans disperser l'attention.
+
+En phase `VOTING`, `GuessScale` reste dans ce header de phase, directement sous la consigne, tandis que la sidebar conserve la progression du vote, l'action de validation puis le message d'attente après confirmation. Sur mobile, la mise en page repasse en une colonne et autorise le défilement vertical lorsque le contenu dépasse la hauteur du viewport. Le canvas conserve son ratio **4:3** tout en ajustant sa taille à l'espace disponible, et l'interface de vote reste compacte pour préserver la place du dessin et de la jauge.
+
+## Consignes structurées et jauges de niveau
 
 Chaque consigne est désormais un objet structuré contenant :
 
@@ -132,11 +142,43 @@ interface DrawingPrompt {
 
 La phrase complète indique toujours le sujet à représenter, puis l’extrême correspondant au niveau **10** avant celui du niveau **1**. Par exemple : `Représente une fée de la plus puissante (10) à la moins puissante (1).` Les formulations vagues telles que « plus ou moins » ne sont plus admises. Les libellés `lowLabel` et `highLabel` sont transmis séparément dans l’état public afin que le frontend n’ait jamais à analyser la phrase.
 
-Les phases `ROUND_INTRO`, `DRAWING` et `VOTING` affichent une jauge horizontale informative composée de dix segments colorés, des graduations de 1 à 10 et des deux libellés d’extrémité. Le composant React `ScaleGauge` est un composant de présentation réutilisable, responsive et accessible. Il n’est pas interactif dans cette version : aucun curseur ni envoi de vote n’a encore été ajouté.
+Dans `ROUND_INTRO`, `DRAWING`, `VOTING` et `REVEAL`, la jauge horizontale s'étend sur toute la largeur disponible directement sous la consigne. Elle comprend dix segments colorés, des graduations de 1 à 10 et les deux libellés d’extrémité. Le composant React `ScaleGauge` reste un composant de présentation réutilisable, responsive et accessible. Il affiche le niveau privé du dessinateur pendant les phases autorisées, la propre estimation verrouillée d'un votant ou le secret public pendant `REVEAL`.
 
-Le repère triangulaire et le texte `Niveau secret : X / 10` ne sont rendus que lorsque le client du dessinateur fournit sa valeur privée au composant. Les autres joueurs reçoivent la consigne et voient la même jauge sans valeur, sans repère et sans nombre secret dans le DOM. Le niveau continue d’être envoyé uniquement par l’événement privé `turn:secret` et ne fait jamais partie de `PublicGameState` ou de `room:state`.
+`GuessScale` ajoute l'interaction sans connaître Socket.IO, le salon ou le joueur. En phase `VOTING`, il prend la place de la jauge dans le header, hors de la sidebar, et réutilise les dix couleurs ainsi que le calcul de position de `ScaleGauge`. Il rend dix vrais boutons accessibles intitulés `Choisir X sur 10`. La sélection fonctionne à la souris, au toucher et au clavier, expose aussi la valeur en texte et reste entièrement locale tant que le joueur n'a pas confirmé.
 
-La jauge est conçue pour accueillir plus tard une sélection, plusieurs estimations et la bonne réponse pendant le vote et la révélation, mais aucune de ces fonctionnalités n’est implémentée ici. Les tests automatisés parcourent toute la banque de consignes, vérifient sa projection publique et la confidentialité du secret, puis couvrent les dix segments, les graduations, les positions 1, 5 et 10, les valeurs invalides et l’affichage conditionnel du texte privé.
+Le repère triangulaire et le texte du niveau secret ne sont rendus avant `REVEAL` que lorsque le client du dessinateur fournit sa valeur privée. Les autres joueurs voient la même échelle sans secret. Les tests automatisés parcourent toute la banque de consignes, vérifient sa projection publique et la confidentialité du secret, puis couvrent les jauges informatives et interactives, leurs positions 1, 5 et 10, leur état désactivé et leur balisage accessible.
+
+## Estimations autoritaires et révélation
+
+Pendant `VOTING`, tous les joueurs présents sauf le dessinateur sont calculés comme votants autorisés par le moteur. Le client envoie uniquement :
+
+```ts
+guess:submit
+{ value: number }
+```
+
+L'identifiant du joueur, le code du salon, le secret et le nombre de votes attendus ne font jamais partie du payload. Le serveur retrouve le salon et le joueur à partir de `socket.id`, exige un objet possédant exactement la clé `value`, puis accepte uniquement un nombre fini, entier et compris entre 1 et 10. Une estimation acceptée est horodatée et son acknowledgement privé contient seulement la propre valeur du votant et `submittedAt`.
+
+Avant confirmation, le joueur peut changer librement de segment et aucune donnée n'est envoyée. Le bouton **Valider mon estimation** reste désactivé sans choix et demande une confirmation définitive. Après un acknowledgement réussi, la jauge devient non interactive et le joueur attend les autres. Une erreur conserve son choix local afin qu'il puisse réessayer.
+
+L'état public de vote se limite à :
+
+```ts
+interface PublicVotingState {
+  eligibleVoterCount: number;
+  submittedGuessCount: number;
+}
+```
+
+Il ne contient ni valeur, ni secret, ni nom des joueurs ayant déjà répondu, ni distance, moyenne ou distribution. Tous les clients peuvent donc afficher `2 estimations reçues sur 3` sans apprendre qui a voté ou quelle valeur a été choisie.
+
+Le dernier vote attendu fait passer atomiquement le moteur à `REVEAL`. L'état public contient alors le secret et, dans l'ordre stable des joueurs du salon, chaque non-dessinateur avec son estimation et :
+
+```ts
+distance = Math.abs(guess.value - secretLevel)
+```
+
+L'écran affiche `Exact !` pour une distance nulle ou `Écart : N` dans les autres cas. Il ne trie pas les joueurs par performance, ne calcule aucun score, n'affiche aucun classement et ne propose aucun bouton pour continuer.
 
 ## Dessin vectoriel
 
@@ -178,7 +220,9 @@ La soumission utilise l'événement `drawing:submit` avec le payload `{ drawing 
 3. Vérifiez les six couleurs, les trois épaisseurs, la gomme, **Annuler** et **Tout effacer**. Cette dernière action demande confirmation.
 4. Redimensionnez la fenêtre jusque 320 px de large : le canvas doit conserver son ratio sans débordement et le dessin doit rester identique.
 5. Confirmez la soumission. Les trois clients doivent passer en `VOTING` et afficher exactement le même aperçu ; aucun client non dessinateur ne doit voir les outils ni le niveau secret.
-6. Vérifiez aussi `/api/health`, le bouton de ping Socket.IO, puis le build et le lancement de production décrits plus bas.
+6. Sur un premier votant, choisissez plusieurs valeurs avant de confirmer la dernière. Vérifiez que sa réponse se verrouille et que seul le compteur public passe à `1 sur 2`.
+7. Vérifiez que le dessinateur ne possède aucun contrôle de vote, puis soumettez la dernière estimation depuis le second votant. Tous les clients doivent passer directement à `REVEAL` et afficher le secret, les deux réponses et leurs écarts.
+8. Vérifiez l'absence de score et de bouton de tour suivant, puis contrôlez aussi `/api/health`, le bouton de ping Socket.IO, le responsive à 320 px et le lancement de production décrits plus bas.
 
 ## Stockage et durée de vie des salons
 
@@ -186,7 +230,7 @@ Les salons, les joueurs et l'état de partie sont stockés **uniquement dans la 
 
 La session du navigateur n'est pas persistée. Une actualisation de page ou une déconnexion Socket.IO retire immédiatement le joueur du salon et lui fait perdre sa session locale ; aucune reconnexion automatique n'est mise en place.
 
-Dans le lobby, le joueur doit rejoindre manuellement le salon s'il existe encore et le rôle d'hôte est transféré si nécessaire. Pendant `ROUND_INTRO`, `DRAWING` ou `VOTING`, le départ volontaire, la déconnexion ou l'actualisation de n'importe quel joueur annule la partie pour tout le groupe. Les joueurs restants reviennent au lobby avec un message explicatif et doivent de nouveau préparer le salon avant un prochain lancement.
+Dans le lobby, le joueur doit rejoindre manuellement le salon s'il existe encore et le rôle d'hôte est transféré si nécessaire. Pendant `ROUND_INTRO`, `DRAWING`, `VOTING` ou `REVEAL`, le départ volontaire, la déconnexion ou l'actualisation de n'importe quel joueur annule la partie pour tout le groupe. Les joueurs restants reviennent au lobby avec un message explicatif et doivent de nouveau préparer le salon avant un prochain lancement. Le dessin et les estimations du tour annulé disparaissent avec l'état de partie.
 
 ## Vérification des types
 
@@ -204,9 +248,9 @@ Exécutez les tests depuis la racine :
 npm test
 ```
 
-Cette commande lance les tests Vitest : tests unitaires de la logique des salons, de la partie, du document vectoriel et de sa géométrie, ainsi que des tests d'intégration avec un serveur sur un port éphémère et de vrais clients Socket.IO. Ils couvrent notamment la capacité maximale, la validation stricte du dessin, les autorisations de soumission, les transitions de phase, la confidentialité du niveau secret, l'annulation sur départ ou déconnexion et l'isolation entre salons.
+Cette commande lance les tests Vitest : tests unitaires de la logique des salons, de la partie, des estimations, du document vectoriel et de sa géométrie, ainsi que des tests d'intégration avec un serveur sur un port éphémère et de vrais clients Socket.IO. Ils couvrent notamment la capacité maximale, les validations strictes du dessin et des votes, les autorisations, le double vote, les transitions de phase, la confidentialité pendant `VOTING`, les distances de `REVEAL`, l'annulation sur départ ou déconnexion et l'isolation entre salons.
 
-La suite actuelle contient **171 tests**. Les contrôles ajoutés parcourent les 36 consignes, vérifient leur projection publique, testent le calcul et le rendu de `ScaleGauge`, puis rendent les trois écrans côté serveur pour confirmer qu’un observateur ne reçoit ni repère ni texte secret.
+La suite actuelle contient **231 tests**. Les contrôles client couvrent aussi les dix boutons de `GuessScale`, les valeurs 1, 5 et 10, le verrouillage, les états votant et dessinateur de `VotingScreen`, la progression publique, le rendu complet de `RevealScreen`, la grande jauge sous la consigne et la répartition entre le header et la sidebar des phases actives.
 
 ## Build et lancement en production
 
@@ -253,7 +297,7 @@ En développement, le même endpoint est également disponible via le proxy du f
 
 Le bouton envoie l'événement `client:ping`. Le serveur répond uniquement au client concerné avec `server:pong` ; les noms d'événements et leurs payloads sont déclarés dans le workspace `shared`.
 
-Les actions utilisent également des événements typés : `room:create`, `room:join`, `room:leave`, `player:set-ready`, `game:start` et `drawing:submit`. Le serveur diffuse ensuite l'état public à jour avec `room:state`, sans exposer les identifiants Socket.IO internes ni le niveau secret.
+Les actions utilisent également des événements typés : `room:create`, `room:join`, `room:leave`, `player:set-ready`, `game:start`, `drawing:submit` et `guess:submit`. Le serveur diffuse ensuite l'état public à jour avec `room:state`. Pendant `VOTING`, cette diffusion expose uniquement les compteurs du vote ; pendant `REVEAL`, elle expose le secret, les estimations validées et leurs distances.
 
 Pendant la partie, `turn:secret` est envoyé uniquement au dessinateur et `game:cancelled` informe les joueurs restants qu'un départ ou une déconnexion a interrompu la partie.
 
@@ -262,7 +306,8 @@ Pendant la partie, `turn:secret` est envoyé uniquement au dessinateur et `game:
 Cette version ne comprend pas encore :
 
 - la rotation des dessinateurs, le passage au deuxième tour ou à la deuxième manche et la fin de partie ;
-- les votes, estimations, scores ou résultats ;
+- les scores, points, bonus, pénalités, assurance ou classement ;
+- un bouton de continuation après la révélation ;
 - une durée de dessin et un chronomètre de fin de tour ;
 - la reconnexion ou la restauration d'une session après actualisation ;
 - l'authentification et les comptes utilisateurs ;

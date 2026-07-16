@@ -9,6 +9,7 @@ import {
   type ServerToClientEvents,
   type StartGameSuccessData,
   type SubmitDrawingSuccessData,
+  type SubmitGuessSuccessData,
 } from "@drawing-game/shared";
 import type { Server } from "socket.io";
 
@@ -284,6 +285,35 @@ export function registerSocketHandlers(
             submission.room,
           );
           request.acknowledge({ success: true, data: submission });
+        } catch (error) {
+          request.acknowledge(actionFailure(error));
+        }
+      },
+    );
+
+    socket.on(
+      SOCKET_EVENTS.GUESS_SUBMIT,
+      (...argumentsReceived: unknown[]) => {
+        const request = getActionRequest<SubmitGuessSuccessData>(
+          argumentsReceived,
+        );
+        if (request === null) {
+          return;
+        }
+
+        try {
+          const submission = gameManager.submitGuess(
+            socket.id,
+            request.payload,
+          );
+          io.to(submission.room.code).emit(
+            SOCKET_EVENTS.ROOM_STATE,
+            submission.room,
+          );
+          request.acknowledge({
+            success: true,
+            data: submission.guess,
+          });
         } catch (error) {
           request.acknowledge(actionFailure(error));
         }

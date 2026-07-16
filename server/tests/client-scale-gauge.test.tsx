@@ -45,6 +45,15 @@ describe("ScaleGauge calculations", () => {
 });
 
 describe("ScaleGauge markup", () => {
+  it("utilise la variante pleine largeur par défaut et conserve la variante compacte", () => {
+    expect(renderGauge()).toContain(
+      'class="scale-gauge scale-gauge--full"',
+    );
+    expect(renderGauge({ size: "compact" })).toContain(
+      'class="scale-gauge scale-gauge--compact"',
+    );
+  });
+
   it("rend dix segments et les dix graduations", () => {
     const markup = renderGauge();
 

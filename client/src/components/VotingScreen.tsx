@@ -1,94 +1,137 @@
-import type { PublicGameState } from "@drawing-game/shared";
+import type { GuessValue, PublicGameState } from "@drawing-game/shared";
 
-import type { PendingRoomAction } from "../hooks/useRoomSession";
+import type {
+  ClientGuessState,
+  PendingRoomAction,
+} from "../hooks/useRoomSession";
 import { DrawingPreview } from "./drawing/DrawingPreview";
+import { GameLeaveAction } from "./game/GameLeaveAction";
+import { GamePhaseLayout } from "./game/GamePhaseLayout";
+import {
+  GamePromptHeader,
+  GamePromptValue,
+} from "./game/GamePromptHeader";
+import { GameStatusPanel } from "./game/GameStatusPanel";
+import { GuessScale } from "./scale/GuessScale.js";
 import { ScaleGauge } from "./scale/ScaleGauge";
 
 interface VotingScreenProps {
   game: PublicGameState;
   currentPlayerId: string | null;
-  secretLevel: number | null;
+  secretLevel: GuessValue | null;
+  guessState: ClientGuessState;
   pendingAction: PendingRoomAction;
   errorMessage: string | null;
+  onSelectGuess: (value: GuessValue) => void;
+  onSubmitGuess: () => boolean;
   onLeaveRoom: () => void;
+}
+
+function formatVoteProgress(submittedCount: number, eligibleCount: number) {
+  const submittedLabel =
+    submittedCount === 1 ? "estimation reçue" : "estimations reçues";
+
+  return `${submittedCount} ${submittedLabel} sur ${eligibleCount}`;
 }
 
 export function VotingScreen({
   game,
   currentPlayerId,
   secretLevel,
+  guessState,
   pendingAction,
   errorMessage,
+  onSelectGuess,
+  onSubmitGuess,
   onLeaveRoom,
 }: VotingScreenProps) {
   const isDrawer = currentPlayerId === game.currentDrawer.id;
-  const isPending = pendingAction !== null;
+  const isPending = pendingAction !== null || guessState.isSubmitting;
+  const voting = game.voting;
+  const voteProgress =
+    voting === null
+      ? "Progression des estimations indisponible"
+      : formatVoteProgress(
+          voting.submittedGuessCount,
+          voting.eligibleVoterCount,
+        );
+  const submittedGuess = guessState.submitted?.value ?? null;
+  const displayedGuess = submittedGuess ?? guessState.selected;
+
+  const handleGuessChange = (value: number) => {
+    if (Number.isInteger(value) && value >= 1 && value <= 10) {
+      onSelectGuess(value as GuessValue);
+    }
+  };
+
+  const handleGuessSubmission = () => {
+    if (guessState.selected === null || guessState.isSubmitting) {
+      return;
+    }
+
+    const shouldSubmit = window.confirm(
+      `Valider définitivement l’estimation ${guessState.selected} / 10 ?`,
+    );
+
+    if (shouldSubmit) {
+      onSubmitGuess();
+    }
+  };
 
   return (
-    <section
-      className="game-card game-phase voting-screen"
-      aria-labelledby="voting-title"
-      aria-busy={isPending}
+    <GamePhaseLayout
+      ariaLabel="Phase d’estimation"
+      className="voting-screen"
+      prompt={
+        <GamePromptHeader
+          statement={game.prompt.statement}
+          gaugePrompt={
+            isDrawer ? undefined : (
+              <p id="guess-question-title">
+                Quel niveau le dessinateur devait-il représenter ?
+              </p>
+            )
+          }
+          gauge={
+            isDrawer ? (
+              <ScaleGauge
+                lowLabel={game.prompt.lowLabel}
+                highLabel={game.prompt.highLabel}
+                value={secretLevel}
+                valueTextLabel="Votre niveau secret"
+                size="full"
+              />
+            ) : (
+              <GuessScale
+                lowLabel={game.prompt.lowLabel}
+                highLabel={game.prompt.highLabel}
+                value={displayedGuess}
+                onChange={handleGuessChange}
+                disabled={isPending || submittedGuess !== null}
+                ariaLabel="Choisissez votre estimation définitive entre 1 et 10"
+                size="full"
+                showValueText={false}
+              />
+            )
+          }
+          valueText={
+            isDrawer && secretLevel !== null ? (
+              <GamePromptValue
+                label="Votre niveau secret"
+                value={secretLevel}
+              />
+            ) : displayedGuess !== null ? (
+              <GamePromptValue
+                label="Votre estimation"
+                value={displayedGuess}
+              />
+            ) : undefined
+          }
+        />
+      }
+      isBusy={isPending}
     >
-      <header className="phase-heading">
-        <div>
-          <p className="eyebrow">Dessin envoyé</p>
-          <h2 id="voting-title">
-            {isDrawer ? "Votre dessin a bien été envoyé" : "Observez le dessin"}
-          </h2>
-        </div>
-      </header>
-
-      <ul className="phase-meta" aria-label="Progression de la partie">
-        <li>
-          <span>Manche</span>
-          <strong>
-            {game.currentRound} / {game.totalRounds}
-          </strong>
-        </li>
-        <li>
-          <span>Tour</span>
-          <strong>
-            {game.currentTurnNumber} / {game.totalTurns}
-          </strong>
-        </li>
-        <li>
-          <span>Dessinateur</span>
-          <strong>{game.currentDrawer.nickname}</strong>
-        </li>
-      </ul>
-
-      {errorMessage !== null && (
-        <p className="form-message form-message--error" role="alert">
-          {errorMessage}
-        </p>
-      )}
-
-      <section className="phase-primary-card phase-primary-card--compact" aria-labelledby="voting-prompt-title">
-        <div className="phase-prompt">
-          <p className="card-label">Consigne du tour</p>
-          <h3 id="voting-prompt-title">À représenter</h3>
-          <p className="prompt-text">{game.prompt.statement}</p>
-        </div>
-
-        {isDrawer && secretLevel !== null ? (
-          <ScaleGauge
-            lowLabel={game.prompt.lowLabel}
-            highLabel={game.prompt.highLabel}
-            value={secretLevel}
-            showValueText
-            size="compact"
-          />
-        ) : (
-          <ScaleGauge
-            lowLabel={game.prompt.lowLabel}
-            highLabel={game.prompt.highLabel}
-            size="compact"
-          />
-        )}
-      </section>
-
-      <div className="voting-content">
+      <div className="game-phase-layout__main game-media-viewport">
         {game.submittedDrawing === null ? (
           <p className="form-message form-message--error" role="alert">
             Le dessin soumis est indisponible. Attendez le prochain état du
@@ -100,48 +143,101 @@ export function VotingScreen({
             description={`Dessin soumis par ${game.currentDrawer.nickname} pour la consigne « ${game.prompt.statement} ».`}
           />
         )}
+      </div>
+
+      <aside className="game-phase-layout__sidebar voting-sidebar">
+        <GameStatusPanel game={game} />
+
+        {errorMessage !== null && (
+          <p
+            className="form-message form-message--error game-sidebar-message"
+            role="alert"
+          >
+            {errorMessage}
+          </p>
+        )}
+
+        {voting === null && (
+          <p
+            className="form-message form-message--error game-sidebar-message"
+            role="alert"
+          >
+            La progression du vote est indisponible. Attendez le prochain état
+            du serveur.
+          </p>
+        )}
+
+        <div
+          className="vote-progress"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+        >
+          <span>Progression</span>
+          <strong>{voteProgress}</strong>
+        </div>
 
         {isDrawer ? (
-          <aside className="secret-card voting-message" aria-labelledby="drawer-vote-title">
-            <p className="card-label">Prochaine étape</p>
-            <h3 id="drawer-vote-title">Le groupe votera bientôt</h3>
-            <p>
-              Votre niveau reste privé. Les autres joueurs devront bientôt
-              estimer ce que votre dessin représente.
-            </p>
-          </aside>
+          <section
+            className="game-sidebar-section voting-wait-state"
+            aria-labelledby="drawer-vote-title"
+          >
+            <p className="card-label">Vote en cours</p>
+            <h2 id="drawer-vote-title">
+              Les autres joueurs essaient de deviner votre niveau.
+            </h2>
+            <p>Votre niveau reste masqué jusqu’à la révélation.</p>
+          </section>
+        ) : guessState.submitted !== null ? (
+          <section
+            className="game-sidebar-section submitted-guess-card voting-wait-state"
+            aria-labelledby="submitted-guess-title"
+          >
+            <p className="card-label">Estimation validée</p>
+            <h2 id="submitted-guess-title">Votre réponse est enregistrée.</h2>
+            <p>En attente des autres joueurs…</p>
+          </section>
         ) : (
-          <aside className="waiting-card voting-message" aria-labelledby="observer-vote-title">
-            <p className="card-label">Prochaine étape</p>
-            <h3 id="observer-vote-title">Le vote arrive bientôt</h3>
-            <p>
-              Vous devrez bientôt estimer le niveau représenté. Aucun contrôle
-              de vote n’est encore disponible.
-            </p>
-          </aside>
+          <section
+            className="game-sidebar-section guess-submit-panel"
+            aria-label="Validation de l’estimation"
+          >
+            {guessState.error !== null && (
+              <p
+                className="form-message form-message--error guess-error"
+                role="alert"
+              >
+                {guessState.error}
+              </p>
+            )}
+
+            <button
+              className="button button--primary guess-submit-button"
+              type="button"
+              onClick={handleGuessSubmission}
+              disabled={guessState.selected === null || isPending}
+            >
+              {guessState.isSubmitting
+                ? "Validation…"
+                : "Valider mon estimation"}
+            </button>
+          </section>
         )}
-      </div>
 
-      <div className="game-actions">
-        <p id="voting-leave-warning">
-          Quitter maintenant annulera la partie pour le groupe.
-        </p>
-        <button
-          className="button button--danger-ghost"
-          type="button"
-          onClick={onLeaveRoom}
+        <GameLeaveAction
+          id="voting-leave-warning"
+          message="Quitter annule la partie pour le groupe."
+          pendingAction={pendingAction}
           disabled={isPending}
-          aria-describedby="voting-leave-warning"
-        >
-          {pendingAction === "leave" ? "Départ…" : "Quitter la partie"}
-        </button>
-      </div>
+          onLeaveRoom={onLeaveRoom}
+        />
 
-      {pendingAction !== null && (
-        <p className="visually-hidden" role="status" aria-live="polite">
-          Départ de la partie en cours.
-        </p>
-      )}
-    </section>
+        {guessState.isSubmitting && (
+          <p className="visually-hidden" role="status" aria-live="polite">
+            Validation de votre estimation en cours.
+          </p>
+        )}
+      </aside>
+    </GamePhaseLayout>
   );
 }

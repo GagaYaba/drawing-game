@@ -5,6 +5,13 @@ import type {
 
 import type { PendingRoomAction } from "../hooks/useRoomSession";
 import { DrawingEditor } from "./drawing/DrawingEditor";
+import { GameLeaveAction } from "./game/GameLeaveAction";
+import { GamePhaseLayout } from "./game/GamePhaseLayout";
+import {
+  GamePromptHeader,
+  GamePromptValue,
+} from "./game/GamePromptHeader";
+import { GameStatusPanel } from "./game/GameStatusPanel";
 import { ScaleGauge } from "./scale/ScaleGauge";
 
 interface DrawingScreenProps {
@@ -29,128 +36,121 @@ export function DrawingScreen({
   const isDrawer = currentPlayerId === game.currentDrawer.id;
   const isPending = pendingAction !== null;
   const isSubmitting = pendingAction === "submitDrawing";
+  const promptHeader = (
+    <GamePromptHeader
+      statement={game.prompt.statement}
+      gauge={
+        <ScaleGauge
+          lowLabel={game.prompt.lowLabel}
+          highLabel={game.prompt.highLabel}
+          value={isDrawer ? secretLevel : null}
+          valueTextLabel="Niveau à représenter"
+          size="full"
+        />
+      }
+      valueText={
+        isDrawer && secretLevel !== null ? (
+          <GamePromptValue
+            label="Niveau à représenter"
+            value={secretLevel}
+          />
+        ) : undefined
+      }
+    />
+  );
+  const leaveAction = (
+    <GameLeaveAction
+      id="drawing-leave-warning"
+      message="Quitter annule la partie pour le groupe."
+      pendingAction={pendingAction}
+      disabled={isPending}
+      onLeaveRoom={onLeaveRoom}
+    />
+  );
 
   return (
-    <section
-      className="game-card game-phase drawing-screen"
-      aria-labelledby="drawing-title"
-      aria-busy={isPending}
+    <GamePhaseLayout
+      ariaLabel="Phase de dessin"
+      className="drawing-screen"
+      prompt={promptHeader}
+      isBusy={isPending}
     >
-      <header className="phase-heading">
-        <div>
-          <p className="eyebrow">Dessin en cours</p>
-          <h2 id="drawing-title">
-            {isDrawer
-              ? "À vous de dessiner"
-              : `${game.currentDrawer.nickname} est en train de dessiner…`}
-          </h2>
-        </div>
-      </header>
-
-      <ul className="phase-meta" aria-label="Progression de la partie">
-        <li>
-          <span>Manche</span>
-          <strong>
-            {game.currentRound} / {game.totalRounds}
-          </strong>
-        </li>
-        <li>
-          <span>Tour</span>
-          <strong>
-            {game.currentTurnNumber} / {game.totalTurns}
-          </strong>
-        </li>
-        <li>
-          <span>Dessinateur</span>
-          <strong>{game.currentDrawer.nickname}</strong>
-        </li>
-      </ul>
-
-      {errorMessage !== null && (
-        <p className="form-message form-message--error" role="alert">
-          {errorMessage}
-        </p>
-      )}
-
-      <section className="phase-primary-card phase-primary-card--compact" aria-labelledby="drawing-prompt-title">
-        <div className="phase-prompt">
-          <p className="card-label">Consigne du tour</p>
-          <h3 id="drawing-prompt-title">À représenter</h3>
-          <p className="prompt-text">{game.prompt.statement}</p>
-        </div>
-
-        {isDrawer && secretLevel !== null ? (
-          <ScaleGauge
-            lowLabel={game.prompt.lowLabel}
-            highLabel={game.prompt.highLabel}
-            value={secretLevel}
-            showValueText
-            valueTextLabel="Niveau à représenter"
-            size="compact"
-          />
-        ) : (
-          <ScaleGauge
-            lowLabel={game.prompt.lowLabel}
-            highLabel={game.prompt.highLabel}
-            size="compact"
-          />
-        )}
-
-        {isDrawer && secretLevel === null && (
-          <p className="private-level-loading" role="status" aria-live="polite">
-            Réception de votre niveau secret…
-          </p>
-        )}
-      </section>
-
       {isDrawer ? (
-        <div className="drawer-area drawer-area--single">
-          <DrawingEditor
-            disabled={isPending || secretLevel === null}
-            isSubmitting={isSubmitting}
-            onSubmit={onSubmitDrawing}
-          />
-        </div>
+        <DrawingEditor
+          disabled={isPending || secretLevel === null}
+          isSubmitting={isSubmitting}
+          onSubmit={onSubmitDrawing}
+          sidebarHeader={
+            <>
+              <GameStatusPanel game={game} />
+              {errorMessage !== null && (
+                <p
+                  className="form-message form-message--error game-sidebar-message"
+                  role="alert"
+                >
+                  {errorMessage}
+                </p>
+              )}
+              {secretLevel === null && (
+                <p
+                  className="private-level-loading game-sidebar-message"
+                  role="status"
+                  aria-live="polite"
+                >
+                  Réception de votre niveau secret…
+                </p>
+              )}
+            </>
+          }
+          sidebarFooter={leaveAction}
+        />
       ) : (
-        <aside
-          className="waiting-card drawing-waiting"
-          aria-labelledby="drawing-wait-title"
-        >
-          <p className="card-label">En attendant le dessin</p>
-          <h3 id="drawing-wait-title">
-            {game.currentDrawer.nickname} dessine en ce moment
-          </h3>
-          <p>
-            La consigne et son échelle sont visibles par tous, mais le niveau
-            reste secret. Le dessin apparaîtra seulement après sa validation.
-          </p>
-        </aside>
-      )}
+        <>
+          <div className="game-phase-layout__main drawing-observer-stage">
+            <span className="drawing-observer-stage__icon" aria-hidden="true">
+              ✎
+            </span>
+            <p>Le dessin apparaîtra ici après sa validation.</p>
+          </div>
 
-      <div className="game-actions">
-        <p id="drawing-leave-warning">
-          Quitter maintenant annulera la partie pour le groupe.
-        </p>
-        <button
-          className="button button--danger-ghost"
-          type="button"
-          onClick={onLeaveRoom}
-          disabled={isPending}
-          aria-describedby="drawing-leave-warning"
-        >
-          {pendingAction === "leave" ? "Départ…" : "Quitter la partie"}
-        </button>
-      </div>
+          <aside className="game-phase-layout__sidebar">
+            <GameStatusPanel game={game} />
 
-      {pendingAction !== null && (
-        <p className="visually-hidden" role="status" aria-live="polite">
-          {pendingAction === "leave"
-            ? "Départ de la partie en cours."
-            : pendingAction === "submitDrawing"
-              ? "Envoi du dessin en cours."
-              : "Action en cours."}
-        </p>
+            {errorMessage !== null && (
+              <p
+                className="form-message form-message--error game-sidebar-message"
+                role="alert"
+              >
+                {errorMessage}
+              </p>
+            )}
+
+            <section
+              className="game-sidebar-card game-sidebar-card--waiting"
+              aria-labelledby="drawing-wait-title"
+            >
+              <p className="card-label">Dessin en cours</p>
+              <h2 id="drawing-wait-title">
+                {game.currentDrawer.nickname} dessine actuellement.
+              </h2>
+              <p>
+                Son niveau reste secret. Le dessin apparaîtra seulement après
+                sa validation.
+              </p>
+            </section>
+
+            {leaveAction}
+
+            {pendingAction !== null && (
+              <p className="visually-hidden" role="status" aria-live="polite">
+                {pendingAction === "leave"
+                  ? "Départ de la partie en cours."
+                  : "Action en cours."}
+              </p>
+            )}
+          </aside>
+        </>
       )}
-    </section>
+    </GamePhaseLayout>
   );
 }

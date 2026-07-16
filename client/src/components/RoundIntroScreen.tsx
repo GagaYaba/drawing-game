@@ -3,6 +3,13 @@ import { useEffect, useState } from "react";
 import type { PublicGameState } from "@drawing-game/shared";
 
 import type { PendingRoomAction } from "../hooks/useRoomSession";
+import { GameLeaveAction } from "./game/GameLeaveAction";
+import { GamePhaseLayout } from "./game/GamePhaseLayout";
+import {
+  GamePromptHeader,
+  GamePromptValue,
+} from "./game/GamePromptHeader";
+import { GameStatusPanel } from "./game/GameStatusPanel";
 import { ScaleGauge } from "./scale/ScaleGauge";
 
 interface RoundIntroScreenProps {
@@ -62,109 +69,91 @@ export function RoundIntroScreen({
         : "Le serveur prépare la zone de dessin…";
 
   return (
-    <section
-      className="game-card game-phase round-intro"
-      aria-labelledby="round-intro-title"
-      aria-busy={isPending}
+    <GamePhaseLayout
+      ariaLabel="Présentation du tour"
+      className="round-intro"
+      isBusy={isPending}
+      prompt={
+        <GamePromptHeader
+          statement={game.prompt.statement}
+          gauge={
+            <ScaleGauge
+              lowLabel={game.prompt.lowLabel}
+              highLabel={game.prompt.highLabel}
+              value={isDrawer ? secretLevel : null}
+              valueTextLabel="Niveau à représenter"
+              size="full"
+            />
+          }
+          valueText={
+            isDrawer && secretLevel !== null ? (
+              <GamePromptValue
+                label="Niveau à représenter"
+                value={secretLevel}
+              />
+            ) : undefined
+          }
+        />
+      }
     >
-      <ul className="phase-meta phase-meta--prominent" aria-label="Progression de la partie">
-        <li>
-          <span>Manche</span>
-          <strong>
-            {game.currentRound} / {game.totalRounds}
-          </strong>
-        </li>
-        <li>
-          <span>Tour</span>
-          <strong>
-            {game.currentTurnNumber} / {game.totalTurns}
-          </strong>
-        </li>
-        <li>
-          <span>Dessinateur</span>
-          <strong>{game.currentDrawer.nickname}</strong>
-        </li>
-      </ul>
-
-      <header className="phase-heading phase-heading--stacked">
-        <div>
-          <p className="eyebrow">Présentation du tour</p>
-          <h2 id="round-intro-title">
+      <div className="game-phase-layout__main round-intro-stage">
+        <div className="round-intro-stage__content">
+          <p className="card-label">Prochainement</p>
+          <h2>
             {isDrawer
               ? "C’est à vous de dessiner"
               : `${game.currentDrawer.nickname} va dessiner`}
           </h2>
+          {!isDrawer && <p>Son niveau reste secret.</p>}
+          {isDrawer && secretLevel === null && (
+            <p
+              className="private-level-loading"
+              role="status"
+              aria-live="polite"
+            >
+              Réception de votre niveau secret…
+            </p>
+          )}
         </div>
-        {!isDrawer && (
-          <p className="phase-role-note">Son niveau reste secret.</p>
-        )}
-      </header>
-
-      {errorMessage !== null && (
-        <p className="form-message form-message--error" role="alert">
-          {errorMessage}
-        </p>
-      )}
-
-      <section className="phase-primary-card" aria-labelledby="intro-prompt-title">
-        <div className="phase-prompt">
-          <p className="card-label">Consigne du tour</p>
-          <h3 id="intro-prompt-title">À représenter</h3>
-          <p className="prompt-text">{game.prompt.statement}</p>
-        </div>
-
-        {isDrawer && secretLevel !== null ? (
-          <ScaleGauge
-            lowLabel={game.prompt.lowLabel}
-            highLabel={game.prompt.highLabel}
-            value={secretLevel}
-            showValueText
-          />
-        ) : (
-          <ScaleGauge
-            lowLabel={game.prompt.lowLabel}
-            highLabel={game.prompt.highLabel}
-          />
-        )}
-
-        {isDrawer && secretLevel === null && (
-          <p className="private-level-loading" role="status" aria-live="polite">
-            Réception de votre niveau secret…
-          </p>
-        )}
-      </section>
-
-      <p
-        className="countdown countdown--wide"
-        role="status"
-        aria-live="polite"
-        aria-atomic="true"
-      >
-        {countdownMessage}
-      </p>
-
-      <div className="game-actions">
-        <p id="round-leave-warning">
-          Quitter maintenant annulera la partie pour le groupe.
-        </p>
-        <button
-          className="button button--danger-ghost"
-          type="button"
-          onClick={onLeaveRoom}
-          disabled={isPending}
-          aria-describedby="round-leave-warning"
-        >
-          {pendingAction === "leave" ? "Départ…" : "Quitter la partie"}
-        </button>
       </div>
 
-      {pendingAction !== null && (
-        <p className="visually-hidden" role="status" aria-live="polite">
-          {pendingAction === "leave"
-            ? "Départ de la partie en cours."
-            : "Lancement de la partie en cours."}
+      <aside className="game-phase-layout__sidebar">
+        <GameStatusPanel game={game} />
+
+        {errorMessage !== null && (
+          <p
+            className="form-message form-message--error game-sidebar-message"
+            role="alert"
+          >
+            {errorMessage}
+          </p>
+        )}
+
+        <p
+          className="countdown game-sidebar-countdown"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+        >
+          {countdownMessage}
         </p>
-      )}
-    </section>
+
+        <GameLeaveAction
+          id="round-leave-warning"
+          message="Quitter annule la partie pour le groupe."
+          pendingAction={pendingAction}
+          disabled={isPending}
+          onLeaveRoom={onLeaveRoom}
+        />
+
+        {pendingAction !== null && (
+          <p className="visually-hidden" role="status" aria-live="polite">
+            {pendingAction === "leave"
+              ? "Départ de la partie en cours."
+              : "Lancement de la partie en cours."}
+          </p>
+        )}
+      </aside>
+    </GamePhaseLayout>
   );
 }

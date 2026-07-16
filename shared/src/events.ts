@@ -8,6 +8,7 @@ export const SOCKET_EVENTS = {
   PLAYER_SET_READY: "player:set-ready",
   GAME_START: "game:start",
   DRAWING_SUBMIT: "drawing:submit",
+  GUESS_SUBMIT: "guess:submit",
   TURN_SECRET: "turn:secret",
   GAME_CANCELLED: "game:cancelled",
 } as const;

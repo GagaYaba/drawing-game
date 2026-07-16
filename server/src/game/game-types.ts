@@ -1,8 +1,10 @@
 import type {
   DrawingDocument,
   GamePhase,
+  GuessValue,
   PublicGamePrompt,
   PublicRoomState,
+  SubmitGuessSuccessData,
   TurnSecretPayload,
 } from "@drawing-game/shared";
 
@@ -10,12 +12,19 @@ export interface DrawingPrompt extends PublicGamePrompt {
   category: string;
 }
 
+export interface InternalGuess {
+  playerId: string;
+  value: GuessValue;
+  submittedAt: number;
+}
+
 export interface InternalTurn {
   drawerPlayerId: string;
   prompt: DrawingPrompt;
-  secretLevel: number;
+  secretLevel: GuessValue;
   drawing: DrawingDocument | null;
   drawingSubmittedAt: number | null;
+  guesses: Record<string, InternalGuess>;
 }
 
 export interface InternalGame {
@@ -64,4 +73,9 @@ export interface StartGameInternalResult {
 
 export interface SubmitDrawingInternalResult {
   room: PublicRoomState;
+}
+
+export interface SubmitGuessInternalResult {
+  room: PublicRoomState;
+  guess: SubmitGuessSuccessData;
 }

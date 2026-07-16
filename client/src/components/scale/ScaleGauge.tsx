@@ -13,7 +13,7 @@ export interface ScaleGaugeProps {
   value?: number | null;
   showValueText?: boolean;
   valueTextLabel?: string;
-  size?: "compact" | "default";
+  size?: "full" | "compact";
   ariaLabel?: string;
 }
 
@@ -23,7 +23,7 @@ export function ScaleGauge({
   value,
   showValueText = false,
   valueTextLabel = "Niveau secret",
-  size = "default",
+  size = "full",
   ariaLabel,
 }: ScaleGaugeProps) {
   const validValue = isScaleGaugeValue(value) ? value : null;

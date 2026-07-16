@@ -1,4 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 
 import {
   DRAWING_COLOR_PALETTE,
@@ -23,6 +29,8 @@ interface DrawingEditorProps {
   disabled: boolean;
   isSubmitting: boolean;
   onSubmit: (drawing: DrawingDocument) => boolean;
+  sidebarHeader: ReactNode;
+  sidebarFooter: ReactNode;
 }
 
 const DEFAULT_TOOL: DrawingTool = "pen";
@@ -33,6 +41,8 @@ export function DrawingEditor({
   disabled,
   isSubmitting,
   onSubmit,
+  sidebarHeader,
+  sidebarFooter,
 }: DrawingEditorProps) {
   const [strokes, setStrokes] = useState<DrawingStroke[]>([]);
   const [selectedTool, setSelectedTool] = useState<DrawingTool>(DEFAULT_TOOL);
@@ -117,75 +127,98 @@ export function DrawingEditor({
   };
 
   return (
-    <section className="drawing-editor" aria-labelledby="drawing-editor-title">
-      <div className="drawing-editor-heading">
-        <div>
-          <p className="card-label">Votre dessin</p>
-          <h3 id="drawing-editor-title">Zone de dessin</h3>
-        </div>
-        <p>{strokes.length} trait{strokes.length > 1 ? "s" : ""}</p>
-      </div>
-
-      <p id="drawing-canvas-help" className="drawing-canvas-help">
-        Dessinez avec la souris, le doigt ou un stylet. Le dessin reste dans ce
-        navigateur jusqu’à sa validation.
-      </p>
-
-      <DrawingCanvas
-        strokes={strokes}
-        selectedTool={selectedTool}
-        selectedColor={selectedColor}
-        selectedWidth={selectedWidth}
-        remainingPointCapacity={remainingPointCapacity}
-        disabled={editorIsDisabled}
-        describedBy="drawing-canvas-help"
-        onStrokeComplete={handleStrokeComplete}
-        onStrokeActiveChange={setIsStrokeActive}
-        onLimitReached={handleLimitReached}
-      />
-
-      <DrawingToolbar
-        selectedTool={selectedTool}
-        selectedColor={selectedColor}
-        selectedWidth={selectedWidth}
-        canUndo={strokes.length > 0}
-        disabled={disabled || isStrokeActive}
-        onToolChange={setSelectedTool}
-        onColorChange={handleColorChange}
-        onWidthChange={setSelectedWidth}
-        onUndo={handleUndo}
-        onClear={handleClear}
-      />
-
-      {limitMessage !== null && (
-        <p className="drawing-limit-message" role="status">
-          {limitMessage}
-        </p>
-      )}
-
-      <div className="drawing-submit-area">
-        <p id="drawing-submit-help">
-          La validation est définitive pour ce tour. Vérifiez votre dessin avant
-          de l’envoyer.
-        </p>
-        <button
-          className="button button--primary drawing-submit-button"
-          type="button"
-          disabled={
-            disabled || isSubmitting || isStrokeActive || strokes.length === 0
-          }
-          aria-describedby="drawing-submit-help"
-          onClick={handleSubmit}
+    <>
+      <section
+        className="game-phase-layout__main drawing-editor drawing-editor__canvas-stage"
+        aria-labelledby="drawing-editor-title"
+      >
+        <h2 className="visually-hidden" id="drawing-editor-title">
+          Zone de dessin
+        </h2>
+        <p
+          id="drawing-canvas-help"
+          className="drawing-canvas-help visually-hidden"
         >
-          {isSubmitting ? "Envoi du dessin…" : "Valider le dessin"}
-        </button>
-      </div>
-
-      {isSubmitting && (
-        <p className="visually-hidden" role="status" aria-live="polite">
-          Envoi du dessin au serveur en cours.
+          Dessinez avec la souris, le doigt ou un stylet. Le dessin reste dans
+          ce navigateur jusqu’à sa validation.
         </p>
-      )}
-    </section>
+
+        <div className="game-media-viewport drawing-canvas-viewport">
+          <DrawingCanvas
+            strokes={strokes}
+            selectedTool={selectedTool}
+            selectedColor={selectedColor}
+            selectedWidth={selectedWidth}
+            remainingPointCapacity={remainingPointCapacity}
+            disabled={editorIsDisabled}
+            describedBy="drawing-canvas-help"
+            onStrokeComplete={handleStrokeComplete}
+            onStrokeActiveChange={setIsStrokeActive}
+            onLimitReached={handleLimitReached}
+          />
+        </div>
+      </section>
+
+      <aside className="game-phase-layout__sidebar drawing-editor-controls">
+        {sidebarHeader}
+
+        <div className="drawing-editor-heading">
+          <div>
+            <p className="card-label">Votre dessin</p>
+            <h2>Outils de dessin</h2>
+          </div>
+          <p>
+            {strokes.length} trait{strokes.length > 1 ? "s" : ""}
+          </p>
+        </div>
+
+        <DrawingToolbar
+          selectedTool={selectedTool}
+          selectedColor={selectedColor}
+          selectedWidth={selectedWidth}
+          canUndo={strokes.length > 0}
+          disabled={disabled || isStrokeActive}
+          onToolChange={setSelectedTool}
+          onColorChange={handleColorChange}
+          onWidthChange={setSelectedWidth}
+          onUndo={handleUndo}
+          onClear={handleClear}
+        />
+
+        {limitMessage !== null && (
+          <p className="drawing-limit-message" role="status">
+            {limitMessage}
+          </p>
+        )}
+
+        <div className="drawing-submit-area">
+          <p id="drawing-submit-help">
+            Validation définitive pour ce tour.
+          </p>
+          <button
+            className="button button--primary drawing-submit-button"
+            type="button"
+            disabled={
+              disabled ||
+              isSubmitting ||
+              isStrokeActive ||
+              strokes.length === 0
+            }
+            aria-describedby="drawing-submit-help"
+            onClick={handleSubmit}
+          >
+            {isSubmitting ? "Envoi du dessin…" : "Valider le dessin"}
+          </button>
+        </div>
+
+        {sidebarFooter}
+
+        {isSubmitting && (
+          <p className="visually-hidden" role="status" aria-live="polite">
+            Envoi du dessin au serveur en cours.
+          </p>
+        )}
+      </aside>
+    </>
   );
 }

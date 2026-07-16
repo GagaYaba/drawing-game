@@ -4,6 +4,7 @@ import {
   SOCKET_EVENTS,
   type DrawingDocument,
   type GameCancelledPayload,
+  type GuessValue,
   type PublicRoomState,
   type TurnSecretPayload,
 } from "@drawing-game/shared";
@@ -16,7 +17,19 @@ export interface ClientRoomSession {
 }
 
 export interface ClientGameSecrets {
-  secretLevel: number | null;
+  secretLevel: GuessValue | null;
+}
+
+export interface ClientGuessSubmission {
+  value: GuessValue;
+  submittedAt: number;
+}
+
+export interface ClientGuessState {
+  selected: GuessValue | null;
+  submitted: ClientGuessSubmission | null;
+  isSubmitting: boolean;
+  error: string | null;
 }
 
 export type PendingRoomAction =
@@ -35,6 +48,13 @@ const EMPTY_SESSION: ClientRoomSession = {
 
 const EMPTY_GAME_SECRETS: ClientGameSecrets = {
   secretLevel: null,
+};
+
+const EMPTY_GUESS_STATE: ClientGuessState = {
+  selected: null,
+  submitted: null,
+  isSubmitting: false,
+  error: null,
 };
 
 const ACTION_TIMEOUT_MS = 8_000;
@@ -74,12 +94,35 @@ export function useRoomSession() {
   const currentRoomCodeRef = useRef<string | null>(null);
   const [gameSecrets, setGameSecrets] =
     useState<ClientGameSecrets>(EMPTY_GAME_SECRETS);
+  const [guessState, setGuessState] =
+    useState<ClientGuessState>(EMPTY_GUESS_STATE);
+  const guessStateRef = useRef<ClientGuessState>(EMPTY_GUESS_STATE);
+  const guessActionTokenRef = useRef(0);
   const [pendingAction, setPendingAction] =
     useState<PendingRoomAction>(null);
   const pendingActionRef = useRef<PendingRoomAction>(null);
   const actionTokenRef = useRef(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [noticeMessage, setNoticeMessage] = useState<string | null>(null);
+
+  const updateGuessState = (
+    update:
+      | ClientGuessState
+      | ((currentState: ClientGuessState) => ClientGuessState),
+  ) => {
+    const nextState =
+      typeof update === "function"
+        ? update(guessStateRef.current)
+        : update;
+
+    guessStateRef.current = nextState;
+    setGuessState(nextState);
+  };
+
+  const resetGuessState = () => {
+    guessActionTokenRef.current += 1;
+    updateGuessState(EMPTY_GUESS_STATE);
+  };
 
   useEffect(() => {
     const handleRoomState = (room: PublicRoomState) => {
@@ -100,6 +143,7 @@ export function useRoomSession() {
         actionTokenRef.current += 1;
         setPendingAction(null);
         setGameSecrets(EMPTY_GAME_SECRETS);
+        resetGuessState();
         setNoticeMessage(null);
         setErrorMessage(
           "Vous ne faites plus partie de ce salon. Vous pouvez en rejoindre un autre.",
@@ -121,9 +165,19 @@ export function useRoomSession() {
 
       if (
         room.game === null ||
-        room.game.currentDrawer.id !== currentPlayerId
+        room.game.currentDrawer.id !== currentPlayerId ||
+        room.game.phase === "REVEAL"
       ) {
         setGameSecrets(EMPTY_GAME_SECRETS);
+      }
+
+      const shouldKeepGuessState =
+        room.game !== null &&
+        (room.game.phase === "VOTING" || room.game.phase === "REVEAL") &&
+        room.game.currentDrawer.id !== currentPlayerId;
+
+      if (!shouldKeepGuessState) {
+        resetGuessState();
       }
 
       if (room.game !== null) {
@@ -146,7 +200,7 @@ export function useRoomSession() {
         return;
       }
 
-      setGameSecrets({ secretLevel: payload.secretLevel });
+      setGameSecrets({ secretLevel: payload.secretLevel as GuessValue });
     };
 
     const handleGameCancelled = (payload: GameCancelledPayload) => {
@@ -158,6 +212,7 @@ export function useRoomSession() {
       }
 
       setGameSecrets(EMPTY_GAME_SECRETS);
+      resetGuessState();
       setErrorMessage(null);
       setNoticeMessage(payload.message);
 
@@ -182,6 +237,7 @@ export function useRoomSession() {
       actionTokenRef.current += 1;
       setPendingAction(null);
       setGameSecrets(EMPTY_GAME_SECRETS);
+      resetGuessState();
       setNoticeMessage(null);
       setErrorMessage(
         hadActiveSession
@@ -225,6 +281,7 @@ export function useRoomSession() {
     currentRoomCodeRef.current = null;
     updatePendingAction(null);
     setGameSecrets(EMPTY_GAME_SECRETS);
+    resetGuessState();
     setNoticeMessage(null);
     setSession(EMPTY_SESSION);
     setErrorMessage(
@@ -265,6 +322,7 @@ export function useRoomSession() {
     setErrorMessage(null);
     setNoticeMessage(null);
     setGameSecrets(EMPTY_GAME_SECRETS);
+    resetGuessState();
     const actionToken = beginAction("create");
 
     socket.timeout(ACTION_TIMEOUT_MS).emit(
@@ -318,6 +376,7 @@ export function useRoomSession() {
     setErrorMessage(null);
     setNoticeMessage(null);
     setGameSecrets(EMPTY_GAME_SECRETS);
+    resetGuessState();
     const actionToken = beginAction("join");
 
     socket.timeout(ACTION_TIMEOUT_MS).emit(
@@ -405,6 +464,7 @@ export function useRoomSession() {
 
     setErrorMessage(null);
     setNoticeMessage(null);
+    resetGuessState();
     const actionToken = beginAction("start");
 
     socket.timeout(ACTION_TIMEOUT_MS).emit(
@@ -504,9 +564,135 @@ export function useRoomSession() {
     return true;
   };
 
+  const selectGuess = (value: GuessValue) => {
+    const game = session.room?.game ?? null;
+
+    if (
+      game === null ||
+      game.phase !== "VOTING" ||
+      session.currentPlayerId === null ||
+      game.currentDrawer.id === session.currentPlayerId ||
+      guessStateRef.current.submitted !== null ||
+      guessStateRef.current.isSubmitting
+    ) {
+      return;
+    }
+
+    updateGuessState((currentState) => ({
+      ...currentState,
+      selected: value,
+      error: null,
+    }));
+  };
+
+  const submitGuess = () => {
+    const game = session.room?.game ?? null;
+    const currentGuessState = guessStateRef.current;
+
+    if (pendingActionRef.current !== null) {
+      return false;
+    }
+
+    if (!socket.connected) {
+      updateGuessState((currentState) => ({
+        ...currentState,
+        isSubmitting: false,
+        error:
+          "Connexion au serveur indisponible. Votre estimation n’a pas été envoyée.",
+      }));
+      return false;
+    }
+
+    if (game === null || game.phase !== "VOTING") {
+      updateGuessState((currentState) => ({
+        ...currentState,
+        isSubmitting: false,
+        error: "Le vote n’est plus ouvert.",
+      }));
+      return false;
+    }
+
+    if (
+      session.currentPlayerId === null ||
+      game.currentDrawer.id === session.currentPlayerId
+    ) {
+      updateGuessState((currentState) => ({
+        ...currentState,
+        isSubmitting: false,
+        error: "Le dessinateur ne peut pas voter pendant son propre tour.",
+      }));
+      return false;
+    }
+
+    if (currentGuessState.submitted !== null) {
+      updateGuessState((currentState) => ({
+        ...currentState,
+        error: "Votre estimation a déjà été envoyée.",
+      }));
+      return false;
+    }
+
+    if (currentGuessState.selected === null) {
+      updateGuessState((currentState) => ({
+        ...currentState,
+        error: "Choisissez un niveau entre 1 et 10 avant de valider.",
+      }));
+      return false;
+    }
+
+    const selectedValue = currentGuessState.selected;
+    guessActionTokenRef.current += 1;
+    const guessActionToken = guessActionTokenRef.current;
+
+    updateGuessState((currentState) => ({
+      ...currentState,
+      isSubmitting: true,
+      error: null,
+    }));
+
+    socket.timeout(ACTION_TIMEOUT_MS).emit(
+      SOCKET_EVENTS.GUESS_SUBMIT,
+      { value: selectedValue },
+      (timeoutError, result) => {
+        if (guessActionToken !== guessActionTokenRef.current) {
+          return;
+        }
+
+        if (timeoutError) {
+          updateGuessState((currentState) => ({
+            ...currentState,
+            isSubmitting: false,
+            error:
+              "La réponse du serveur a expiré. Votre sélection est conservée ; vérifiez la progression avant de réessayer.",
+          }));
+          return;
+        }
+
+        if (!result.success) {
+          updateGuessState((currentState) => ({
+            ...currentState,
+            isSubmitting: false,
+            error: result.error.message,
+          }));
+          return;
+        }
+
+        updateGuessState({
+          selected: result.data.value,
+          submitted: result.data,
+          isSubmitting: false,
+          error: null,
+        });
+      },
+    );
+
+    return true;
+  };
+
   const leaveRoom = () => {
     if (
       pendingActionRef.current !== null ||
+      guessStateRef.current.isSubmitting ||
       session.room === null ||
       !ensureSocketIsConnected()
     ) {
@@ -539,6 +725,7 @@ export function useRoomSession() {
         currentPlayerIdRef.current = null;
         currentRoomCodeRef.current = null;
         setGameSecrets(EMPTY_GAME_SECRETS);
+        resetGuessState();
         setNoticeMessage(null);
         setSession(EMPTY_SESSION);
       },
@@ -550,6 +737,7 @@ export function useRoomSession() {
     roomCode,
     session,
     gameSecrets,
+    guessState,
     pendingAction,
     errorMessage,
     noticeMessage,
@@ -560,6 +748,8 @@ export function useRoomSession() {
     setReady,
     startGame,
     submitDrawing,
+    selectGuess,
+    submitGuess,
     leaveRoom,
   };
 }

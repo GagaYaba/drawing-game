@@ -1,4 +1,8 @@
-import type { PublicGameState } from "@drawing-game/shared";
+import type {
+  GuessValue,
+  PublicGameState,
+  PublicRevealState,
+} from "@drawing-game/shared";
 
 import type { RoomManager } from "../rooms/room-manager.js";
 import { RoomManagerError } from "../rooms/room-types.js";
@@ -7,6 +11,7 @@ import {
   cloneDrawingDocument,
   validateSubmitDrawingPayload,
 } from "./drawing-validation.js";
+import { validateSubmitGuessPayload } from "./guess-validation.js";
 import {
   generateSecretLevel,
   selectDrawingPrompt,
@@ -18,6 +23,7 @@ import type {
   InternalGame,
   StartGameInternalResult,
   SubmitDrawingInternalResult,
+  SubmitGuessInternalResult,
 } from "./game-types.js";
 import { DRAWING_PROMPTS } from "./prompt-bank.js";
 
@@ -55,13 +61,102 @@ function validateTurnOrder(
   }
 }
 
-function validateSecretLevel(secretLevel: number): void {
+function validateSecretLevel(
+  secretLevel: number,
+): asserts secretLevel is GuessValue {
   if (!Number.isInteger(secretLevel) || secretLevel < 1 || secretLevel > 10) {
     throw new RoomManagerError(
       "INTERNAL_ERROR",
       "Impossible de générer un niveau secret valide.",
     );
   }
+}
+
+export function getEligibleVoterIds(
+  game: InternalGame,
+  players: readonly InternalPlayer[],
+): string[] {
+  const gamePlayerIds = new Set(game.turnOrder);
+
+  return players
+    .filter(
+      (player) =>
+        player.id !== game.currentTurn.drawerPlayerId &&
+        gamePlayerIds.has(player.id),
+    )
+    .map((player) => player.id);
+}
+
+export function getSubmittedGuessCount(
+  game: InternalGame,
+  eligibleVoterIds: readonly string[],
+): number {
+  return eligibleVoterIds.reduce(
+    (count, playerId) =>
+      Object.prototype.hasOwnProperty.call(
+        game.currentTurn.guesses,
+        playerId,
+      )
+        ? count + 1
+        : count,
+    0,
+  );
+}
+
+export function areAllGuessesSubmitted(
+  game: InternalGame,
+  eligibleVoterIds: readonly string[],
+): boolean {
+  return (
+    eligibleVoterIds.length > 0 &&
+    getSubmittedGuessCount(game, eligibleVoterIds) === eligibleVoterIds.length
+  );
+}
+
+export function createPublicRevealState(
+  game: InternalGame,
+  players: readonly InternalPlayer[],
+): PublicRevealState {
+  const eligibleVoterIds = getEligibleVoterIds(game, players);
+  const eligibleVoterIdSet = new Set(eligibleVoterIds);
+
+  const guesses = players
+    .filter((player) => eligibleVoterIdSet.has(player.id))
+    .map((player) => {
+      const guess = game.currentTurn.guesses[player.id];
+
+      if (
+        guess === undefined ||
+        guess.playerId !== player.id ||
+        !Number.isFinite(guess.submittedAt)
+      ) {
+        throw new RoomManagerError(
+          "INTERNAL_ERROR",
+          "Une estimation attendue est introuvable.",
+        );
+      }
+
+      return {
+        player: {
+          id: player.id,
+          nickname: player.nickname,
+        },
+        value: guess.value,
+        distance: Math.abs(guess.value - game.currentTurn.secretLevel),
+      };
+    });
+
+  if (guesses.length !== eligibleVoterIds.length) {
+    throw new RoomManagerError(
+      "INTERNAL_ERROR",
+      "Impossible de publier toutes les estimations.",
+    );
+  }
+
+  return {
+    secretLevel: game.currentTurn.secretLevel,
+    guesses,
+  };
 }
 
 export function toPublicGameState(
@@ -80,8 +175,10 @@ export function toPublicGameState(
   }
 
   const { drawing, drawingSubmittedAt } = game.currentTurn;
+  const submittedDrawingIsPublic =
+    game.phase === "VOTING" || game.phase === "REVEAL";
   if (
-    game.phase === "VOTING" &&
+    submittedDrawingIsPublic &&
     (drawing === null ||
       drawingSubmittedAt === null ||
       !Number.isFinite(drawingSubmittedAt))
@@ -91,6 +188,8 @@ export function toPublicGameState(
       "Le dessin soumis est introuvable.",
     );
   }
+
+  const eligibleVoterIds = getEligibleVoterIds(game, players);
 
   return {
     phase: game.phase,
@@ -110,13 +209,27 @@ export function toPublicGameState(
     },
     phaseEndsAt: game.phaseEndsAt,
     submittedDrawing:
-      game.phase === "VOTING" &&
+      submittedDrawingIsPublic &&
       drawing !== null &&
       drawingSubmittedAt !== null
         ? {
             document: cloneDrawingDocument(drawing),
             submittedAt: drawingSubmittedAt,
           }
+        : null,
+    voting:
+      game.phase === "VOTING"
+        ? {
+            eligibleVoterCount: eligibleVoterIds.length,
+            submittedGuessCount: getSubmittedGuessCount(
+              game,
+              eligibleVoterIds,
+            ),
+          }
+        : null,
+    reveal:
+      game.phase === "REVEAL"
+        ? createPublicRevealState(game, players)
         : null,
   };
 }
@@ -273,6 +386,7 @@ export class GameManager {
         secretLevel,
         drawing: null,
         drawingSubmittedAt: null,
+        guesses: {},
       },
       startedAt,
       phaseEndsAt: startedAt + this.introDurationMs,
@@ -402,6 +516,124 @@ export class GameManager {
       throw new RoomManagerError(
         "INTERNAL_ERROR",
         "Impossible de publier le dessin soumis.",
+      );
+    }
+  }
+
+  submitGuess(
+    socketId: string,
+    payload: unknown,
+  ): SubmitGuessInternalResult {
+    const room = this.roomManager.getPlayerRoomBySocketId(socketId);
+    if (room === undefined) {
+      throw new RoomManagerError(
+        "NOT_IN_ROOM",
+        "Cette connexion n'appartient à aucun salon.",
+      );
+    }
+
+    const game = room.game;
+    if (game === null) {
+      throw new RoomManagerError(
+        "GAME_NOT_STARTED",
+        "Aucune partie n’est en cours.",
+      );
+    }
+
+    if (game.phase !== "VOTING") {
+      throw new RoomManagerError(
+        "NOT_VOTING_PHASE",
+        "Les estimations ne sont pas ouvertes pendant cette phase.",
+      );
+    }
+
+    const requester = room.players.find(
+      (player) => player.socketId === socketId,
+    );
+    if (requester === undefined) {
+      throw new RoomManagerError(
+        "PLAYER_NOT_FOUND",
+        "Le joueur associé à cette connexion est introuvable.",
+      );
+    }
+
+    if (requester.id === game.currentTurn.drawerPlayerId) {
+      throw new RoomManagerError(
+        "DRAWER_CANNOT_GUESS",
+        "Le dessinateur ne peut pas voter pour son propre dessin.",
+      );
+    }
+
+    const eligibleVoterIds = getEligibleVoterIds(game, room.players);
+    if (!eligibleVoterIds.includes(requester.id)) {
+      throw new RoomManagerError(
+        "PLAYER_NOT_ELIGIBLE",
+        "Vous ne pouvez pas participer à ce vote.",
+      );
+    }
+
+    if (
+      Object.prototype.hasOwnProperty.call(
+        game.currentTurn.guesses,
+        requester.id,
+      )
+    ) {
+      throw new RoomManagerError(
+        "GUESS_ALREADY_SUBMITTED",
+        "Votre estimation a déjà été validée.",
+      );
+    }
+
+    const validation = validateSubmitGuessPayload(payload);
+    if (!validation.success) {
+      throw new RoomManagerError(
+        validation.error.code,
+        validation.error.message,
+      );
+    }
+
+    const submittedAt = this.clock();
+    if (!Number.isFinite(submittedAt)) {
+      throw new RoomManagerError(
+        "INTERNAL_ERROR",
+        "Impossible de dater la soumission de l’estimation.",
+      );
+    }
+
+    const guess = {
+      playerId: requester.id,
+      value: validation.data.value,
+      submittedAt,
+    };
+    const previousPhase = game.phase;
+    const previousPhaseEndsAt = game.phaseEndsAt;
+
+    game.currentTurn.guesses[requester.id] = guess;
+    if (areAllGuessesSubmitted(game, eligibleVoterIds)) {
+      game.phase = "REVEAL";
+      game.phaseEndsAt = null;
+    }
+
+    try {
+      return {
+        room: this.roomManager.getPublicRoomState(room.code),
+        guess: {
+          value: guess.value,
+          submittedAt: guess.submittedAt,
+        },
+      };
+    } catch (error) {
+      delete game.currentTurn.guesses[requester.id];
+      game.phase = previousPhase;
+      game.phaseEndsAt = previousPhaseEndsAt;
+
+      if (error instanceof RoomManagerError) {
+        throw error;
+      }
+
+      throw new RoomManagerError(
+        "INTERNAL_ERROR",
+        "Impossible de publier l’estimation.",
       );
     }
   }

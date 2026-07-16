@@ -17,7 +17,14 @@ export interface PublicPlayer {
   isReady: boolean;
 }
 
-export type GamePhase = "LOBBY" | "ROUND_INTRO" | "DRAWING" | "VOTING";
+export type GamePhase =
+  | "LOBBY"
+  | "ROUND_INTRO"
+  | "DRAWING"
+  | "VOTING"
+  | "REVEAL";
+
+export type GuessValue = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
 
 export interface PublicSubmittedDrawing {
   document: DrawingDocument;
@@ -29,6 +36,25 @@ export interface PublicGamePrompt {
   statement: string;
   lowLabel: string;
   highLabel: string;
+}
+
+export interface PublicVotingState {
+  eligibleVoterCount: number;
+  submittedGuessCount: number;
+}
+
+export interface PublicGuessResult {
+  player: {
+    id: string;
+    nickname: string;
+  };
+  value: GuessValue;
+  distance: number;
+}
+
+export interface PublicRevealState {
+  secretLevel: GuessValue;
+  guesses: PublicGuessResult[];
 }
 
 export interface PublicGameState {
@@ -44,6 +70,8 @@ export interface PublicGameState {
   prompt: PublicGamePrompt;
   phaseEndsAt: number | null;
   submittedDrawing: PublicSubmittedDrawing | null;
+  voting: PublicVotingState | null;
+  reveal: PublicRevealState | null;
 }
 
 export interface PublicRoomState {
@@ -78,6 +106,23 @@ export interface SubmitDrawingSuccessData {
   room: PublicRoomState;
 }
 
+export interface SubmitGuessPayload {
+  value: number;
+}
+
+export interface SubmitGuessSuccessData {
+  value: GuessValue;
+  submittedAt: number;
+}
+
+export type GuessErrorCode =
+  | "GAME_NOT_STARTED"
+  | "NOT_VOTING_PHASE"
+  | "DRAWER_CANNOT_GUESS"
+  | "PLAYER_NOT_ELIGIBLE"
+  | "GUESS_ALREADY_SUBMITTED"
+  | "INVALID_GUESS";
+
 export type RoomErrorCode =
   | "INVALID_NICKNAME"
   | "INVALID_ROOM_CODE"
@@ -94,13 +139,13 @@ export type RoomErrorCode =
   | "PLAYERS_NOT_READY"
   | "GAME_ALREADY_STARTED"
   | "GAME_NOT_IN_LOBBY"
-  | "GAME_NOT_STARTED"
   | "NOT_DRAWING_PHASE"
   | "NOT_CURRENT_DRAWER"
   | "EMPTY_DRAWING"
   | "INVALID_DRAWING"
   | "DRAWING_TOO_LARGE"
   | "DRAWING_ALREADY_SUBMITTED"
+  | GuessErrorCode
   | "INTERNAL_ERROR";
 
 export type ActionResult<T> =
@@ -166,6 +211,10 @@ export interface ClientToServerEvents {
   [SOCKET_EVENTS.DRAWING_SUBMIT]: (
     payload: SubmitDrawingPayload,
     acknowledge: ActionAcknowledgement<SubmitDrawingSuccessData>,
+  ) => void;
+  [SOCKET_EVENTS.GUESS_SUBMIT]: (
+    payload: SubmitGuessPayload,
+    acknowledge: ActionAcknowledgement<SubmitGuessSuccessData>,
   ) => void;
 }
 

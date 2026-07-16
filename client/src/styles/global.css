@@ -708,7 +708,9 @@ summary:focus-visible {
 
 .prompt-card,
 .secret-card,
-.waiting-card {
+.waiting-card,
+.guess-card,
+.reveal-results {
   min-width: 0;
   padding: 1.2rem;
   border-radius: 1rem;
@@ -729,9 +731,21 @@ summary:focus-visible {
   background: #f0f9ff;
 }
 
+.guess-card {
+  border: 1px solid #c7d2fe;
+  background: #f8faff;
+}
+
+.reveal-results {
+  border: 1px solid #c7d2fe;
+  background: #f8faff;
+}
+
 .prompt-card h3,
 .secret-card h3,
-.waiting-card h3 {
+.waiting-card h3,
+.guess-card h3,
+.reveal-results h3 {
   margin: 0.35rem 0 0.65rem;
   color: #1e293b;
   font-size: 1.05rem;
@@ -1089,6 +1103,116 @@ summary:focus-visible {
   min-width: 0;
 }
 
+.guess-card h3 {
+  line-height: 1.35;
+}
+
+.guess-submit-button {
+  margin-top: 1rem;
+}
+
+.guess-error {
+  margin: 1rem 0 0;
+}
+
+.submitted-guess-card {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.submitted-guess-card h3,
+.submitted-guess-card p {
+  margin-bottom: 0;
+}
+
+.submitted-guess-confirmation {
+  color: #075985;
+  font-weight: 800;
+  text-align: center;
+}
+
+.vote-progress {
+  display: flex;
+  min-width: 0;
+  margin-top: 1rem;
+  padding: 0.9rem 1rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border: 1px solid #a7f3d0;
+  border-radius: 0.85rem;
+  color: #065f46;
+  background: #ecfdf5;
+}
+
+.vote-progress span {
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.vote-progress strong {
+  text-align: right;
+}
+
+.reveal-content {
+  display: grid;
+  min-width: 0;
+  margin-top: 1rem;
+  grid-template-columns: minmax(0, 1.35fr) minmax(17rem, 0.65fr);
+  align-items: start;
+  gap: 1rem;
+}
+
+.reveal-results h3 {
+  margin-bottom: 1rem;
+}
+
+.reveal-result-list {
+  display: grid;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  gap: 0.6rem;
+  list-style: none;
+}
+
+.reveal-result-list li {
+  display: grid;
+  min-width: 0;
+  padding: 0.75rem 0.8rem;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 0.75rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.75rem;
+  background: #fff;
+}
+
+.reveal-player-name {
+  min-width: 0;
+  color: #1e293b;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.reveal-guess-value {
+  color: #475569;
+  font-variant-numeric: tabular-nums;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.reveal-distance {
+  padding: 0.3rem 0.5rem;
+  border-radius: 999px;
+  color: #3730a3;
+  background: #eef2ff;
+  font-size: 0.76rem;
+  white-space: nowrap;
+}
+
 .secret-level--compact {
   margin-bottom: 0;
 }
@@ -1237,7 +1361,8 @@ footer {
   .lobby-content,
   .phase-content,
   .drawer-area,
-  .voting-content {
+  .voting-content,
+  .reveal-content {
     grid-template-columns: 1fr;
   }
 }
@@ -1389,6 +1514,830 @@ footer {
 
   .drawing-submit-button {
     width: 100%;
+  }
+
+  .vote-progress {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+
+  .vote-progress strong {
+    text-align: left;
+  }
+
+  .reveal-result-list li {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.45rem 0.65rem;
+  }
+
+  .reveal-distance {
+    grid-column: 1 / -1;
+    width: fit-content;
+  }
+}
+
+/* Full-screen game shell -------------------------------------------------- */
+
+.app-shell--active {
+  width: min(100% - 1rem, 1600px);
+  min-height: 100vh;
+  padding: 0.5rem 0 1rem;
+}
+
+@supports (min-height: 100dvh) {
+  .app-shell--active {
+    min-height: 100dvh;
+  }
+}
+
+.game-phase-layout {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  padding: clamp(0.65rem, 2vw, 0.9rem);
+  grid-template-rows: auto auto;
+  gap: clamp(0.6rem, 1.5vw, 0.85rem);
+}
+
+.game-phase-layout__body {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  grid-template-columns: minmax(0, 1fr);
+  gap: clamp(0.6rem, 1.5vw, 0.85rem);
+}
+
+.game-phase-layout__main {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  place-items: center;
+}
+
+.game-phase-layout__sidebar {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  padding: clamp(0.65rem, 2vw, 0.85rem);
+  flex-direction: column;
+  gap: clamp(0.55rem, 1.5vw, 0.75rem);
+  border: 1px solid #e2e8f0;
+  border-radius: 0.9rem;
+  background: #f8fafc;
+}
+
+.game-prompt-header {
+  display: grid;
+  min-width: 0;
+  padding: clamp(0.65rem, 2vw, 0.9rem);
+  grid-template-columns: minmax(0, 1fr);
+  gap: clamp(0.3rem, 0.8vw, 0.5rem);
+  border: 1px solid #c7d2fe;
+  border-radius: 0.9rem;
+  background:
+    linear-gradient(145deg, rgba(238, 242, 255, 0.96), rgba(255, 255, 255, 0.98));
+}
+
+.game-prompt-header__statement,
+.game-prompt-header__gauge,
+.game-prompt-header__question,
+.game-prompt-header__value {
+  min-width: 0;
+}
+
+.game-prompt-header .card-label {
+  margin: 0 0 0.25rem;
+}
+
+.game-prompt-text {
+  margin: 0;
+  color: #1e1b4b;
+  font-size: clamp(1rem, 3.2vw, 1.35rem);
+  font-weight: 760;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.game-prompt-header__question p {
+  margin: 0;
+  color: #312e81;
+  font-size: clamp(0.82rem, 2vw, 0.96rem);
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.game-prompt-header__value {
+  display: grid;
+  place-items: center;
+}
+
+.game-prompt-header .game-prompt-value {
+  margin: 0;
+  padding-block: 0.32rem;
+}
+
+.game-status-panel {
+  display: grid;
+  min-width: 0;
+  margin: 0;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.35rem;
+}
+
+.game-status-panel > div {
+  display: grid;
+  min-width: 0;
+  margin: 0;
+  padding: 0.55rem;
+  gap: 0.16rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.65rem;
+  background: #fff;
+}
+
+.game-status-panel dt,
+.game-status-panel dd {
+  min-width: 0;
+  margin: 0;
+}
+
+.game-status-panel dt {
+  color: #64748b;
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.game-status-panel dd {
+  color: #1e293b;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.game-status-panel__drawer {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.game-sidebar-section,
+.game-sidebar-card {
+  min-width: 0;
+}
+
+.game-sidebar-section h2,
+.game-sidebar-card h2,
+.drawing-editor-heading h2,
+.reveal-results h2 {
+  margin: 0.25rem 0 0.45rem;
+  color: #1e293b;
+  font-size: clamp(0.9rem, 2vw, 1.05rem);
+  line-height: 1.25;
+  letter-spacing: -0.015em;
+  overflow-wrap: anywhere;
+}
+
+.game-sidebar-section > p:last-child:not(.form-message),
+.game-sidebar-card > p:last-child:not(.form-message) {
+  margin-bottom: 0;
+  color: #64748b;
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.game-sidebar-card {
+  padding: 0.75rem;
+  border-radius: 0.75rem;
+}
+
+.game-sidebar-card--waiting {
+  border: 1px solid #bae6fd;
+  background: #f0f9ff;
+}
+
+.game-sidebar-message {
+  margin: 0;
+  padding: 0.6rem 0.7rem;
+  font-size: 0.76rem;
+}
+
+.game-sidebar-countdown {
+  width: 100%;
+  margin: 0;
+  flex: none;
+}
+
+.game-sidebar-leave {
+  display: grid;
+  min-width: 0;
+  margin-top: 0.2rem;
+  gap: 0.35rem;
+}
+
+.game-sidebar-leave p {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.68rem;
+  line-height: 1.35;
+}
+
+.game-sidebar-leave .button {
+  width: 100%;
+  min-height: 2.75rem;
+  padding-block: 0.6rem;
+  font-size: 0.78rem;
+}
+
+.game-media-viewport {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  place-items: center;
+}
+
+.drawing-editor {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.drawing-editor__canvas-stage {
+  overflow: hidden;
+}
+
+.drawing-canvas-viewport {
+  align-self: stretch;
+}
+
+.drawing-editor-controls {
+  overflow: visible;
+}
+
+.drawing-editor-heading {
+  align-items: center;
+}
+
+.drawing-editor-heading h2 {
+  margin-bottom: 0;
+}
+
+.drawing-editor-heading > p {
+  padding: 0.22rem 0.45rem;
+  border-radius: 999px;
+  background: #e2e8f0;
+  font-variant-numeric: tabular-nums;
+}
+
+.drawing-editor-controls .drawing-toolbar {
+  display: grid;
+  padding: 0.55rem;
+  align-items: stretch;
+  gap: 0.45rem;
+}
+
+.drawing-editor-controls .toolbar-group,
+.drawing-editor-controls .toolbar-group--colors {
+  width: 100%;
+  flex-basis: auto;
+}
+
+.drawing-editor-controls .toolbar-group legend {
+  margin-bottom: 0.25rem;
+  font-size: 0.62rem;
+}
+
+.drawing-editor-controls .toolbar-options,
+.drawing-editor-controls .toolbar-history-actions {
+  display: grid;
+  width: 100%;
+  margin: 0;
+  gap: 0.3rem;
+}
+
+.drawing-editor-controls .toolbar-options--tools,
+.drawing-editor-controls .toolbar-history-actions {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.drawing-editor-controls .toolbar-options--colors {
+  grid-template-columns: repeat(3, 2.75rem);
+  justify-content: center;
+}
+
+.drawing-editor-controls .toolbar-options--widths {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.drawing-editor-controls .tool-button {
+  width: 100%;
+  min-width: 0;
+  padding-inline: 0.35rem;
+}
+
+.drawing-editor-controls .color-button {
+  width: 2.75rem;
+  min-width: 2.75rem;
+}
+
+.drawing-editor-controls .toolbar-selection {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.drawing-editor-controls .drawing-limit-message {
+  font-size: 0.7rem;
+}
+
+.drawing-editor-controls .drawing-submit-area {
+  display: grid;
+  align-items: stretch;
+  justify-content: stretch;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.35rem;
+}
+
+.drawing-editor-controls .drawing-submit-area p {
+  margin: 0;
+  font-size: 0.68rem;
+}
+
+.drawing-editor-controls .drawing-submit-button {
+  width: 100%;
+  min-height: 2.75rem;
+}
+
+.drawing-observer-stage {
+  min-height: clamp(16rem, 56vw, 30rem);
+  padding: 1rem;
+  align-content: center;
+  gap: 0.5rem;
+  border: 2px dashed #cbd5e1;
+  border-radius: 0.9rem;
+  color: #64748b;
+  background: rgba(248, 250, 252, 0.78);
+  text-align: center;
+}
+
+.drawing-observer-stage__icon {
+  color: #818cf8;
+  font-size: 2.4rem;
+}
+
+.drawing-observer-stage p {
+  max-width: 24rem;
+  margin: 0;
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+
+.round-intro-stage {
+  min-height: clamp(14rem, 48vw, 28rem);
+  text-align: center;
+}
+
+.round-intro-stage__content {
+  max-width: 34rem;
+  padding: clamp(1rem, 4vw, 2rem);
+}
+
+.round-intro-stage h2 {
+  margin: 0.3rem 0 0.55rem;
+  color: #111827;
+  font-size: clamp(1.45rem, 5vw, 2.4rem);
+  letter-spacing: -0.035em;
+}
+
+.round-intro-stage p:last-child {
+  margin-bottom: 0;
+  color: #64748b;
+}
+
+.guess-submit-panel {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.guess-submit-panel .guess-submit-button {
+  width: 100%;
+  margin: 0;
+}
+
+.guess-submit-panel .guess-error {
+  margin: 0;
+}
+
+.submitted-guess-card {
+  gap: 0.45rem;
+}
+
+.submitted-guess-card h2,
+.submitted-guess-card p {
+  margin-bottom: 0;
+}
+
+.vote-progress {
+  display: grid;
+  margin: 0;
+  padding: 0.6rem 0.7rem;
+  gap: 0.15rem;
+}
+
+.vote-progress strong {
+  font-size: 0.82rem;
+  text-align: left;
+}
+
+.reveal-sidebar {
+  overflow: hidden;
+}
+
+.reveal-summary {
+  flex: 0 0 auto;
+}
+
+.reveal-results {
+  display: flex;
+  min-height: 0;
+  padding: 0.65rem;
+  flex: 1 1 auto;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 0.75rem;
+}
+
+.reveal-results__heading {
+  flex: 0 0 auto;
+}
+
+.reveal-results h2 {
+  margin-bottom: 0.55rem;
+}
+
+.reveal-result-list {
+  min-height: 0;
+  gap: 0.4rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.reveal-result-list:focus-visible {
+  outline: 3px solid rgba(79, 70, 229, 0.35);
+  outline-offset: 2px;
+}
+
+.reveal-result-list li {
+  padding: 0.55rem 0.6rem;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.35rem 0.55rem;
+}
+
+.reveal-distance {
+  grid-column: 1 / -1;
+  width: fit-content;
+  padding-block: 0.22rem;
+}
+
+@media (min-width: 900px) {
+  .app-shell--active {
+    width: min(100% - 1rem, 1600px);
+    height: 100vh;
+    min-height: 0;
+    padding: clamp(0.45rem, 1.3vh, 0.8rem) 0;
+    overflow: hidden;
+  }
+
+  .game-phase-layout {
+    height: 100%;
+    min-height: 0;
+    padding: clamp(0.5rem, 1.3vh, 0.8rem);
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: clamp(0.45rem, 1.2vh, 0.7rem);
+    overflow: hidden;
+    border-radius: 1rem;
+  }
+
+  .game-phase-layout__body {
+    min-height: 0;
+    grid-template-columns:
+      minmax(0, 1fr)
+      clamp(15rem, 21vw, 18.75rem);
+    gap: clamp(0.5rem, 1vw, 0.75rem);
+    overflow: hidden;
+  }
+
+  .game-phase-layout__main {
+    overflow: hidden;
+  }
+
+  .game-phase-layout__sidebar {
+    padding: clamp(0.5rem, 1.2vh, 0.7rem);
+    gap: clamp(0.4rem, 1vh, 0.65rem);
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .game-prompt-header {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+    padding: clamp(0.5rem, 1.2vh, 0.75rem)
+      clamp(0.65rem, 1.3vw, 1rem);
+    gap: clamp(0.25rem, 0.7vh, 0.45rem);
+  }
+
+  .game-prompt-text {
+    font-size: clamp(1rem, 1.45vw, 1.3rem);
+    line-height: 1.25;
+  }
+
+  .game-prompt-header__question p {
+    font-size: clamp(0.8rem, 1.1vw, 0.94rem);
+  }
+
+  .game-status-panel {
+    grid-template-columns:
+      minmax(0, 0.8fr)
+      minmax(0, 0.65fr)
+      minmax(0, 1.3fr);
+    gap: 0.3rem;
+  }
+
+  .game-status-panel > div {
+    padding: 0.42rem 0.45rem;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+    gap: 0.14rem;
+  }
+
+  .game-status-panel dd {
+    max-width: 100%;
+    text-align: left;
+  }
+
+  .game-sidebar-leave {
+    margin-top: auto;
+  }
+
+  .game-media-viewport {
+    width: 100%;
+    height: 100%;
+    align-self: stretch;
+    overflow: hidden;
+    container-type: size;
+  }
+
+  .game-media-viewport .drawing-canvas-frame,
+  .game-media-viewport .drawing-preview-frame {
+    width: min(100%, calc((100vh - 12rem) * 4 / 3));
+    max-width: 100%;
+  }
+
+  @supports (width: 1cqh) {
+    .game-media-viewport .drawing-canvas-frame,
+    .game-media-viewport .drawing-preview-frame {
+      width: min(100cqw, calc(100cqh * 4 / 3));
+      max-width: none;
+    }
+  }
+
+  .drawing-preview {
+    display: grid;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    place-items: center;
+  }
+
+  .drawing-preview figcaption {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .drawing-observer-stage,
+  .round-intro-stage {
+    min-height: 0;
+    align-self: stretch;
+  }
+
+  .reveal-sidebar .game-sidebar-leave {
+    flex: 0 0 auto;
+  }
+}
+
+@supports (height: 100dvh) {
+  @media (min-width: 900px) {
+    .app-shell--active {
+      height: 100dvh;
+    }
+
+    .game-media-viewport .drawing-canvas-frame,
+    .game-media-viewport .drawing-preview-frame {
+      width: min(100%, calc((100dvh - 12rem) * 4 / 3));
+    }
+
+    @supports (width: 1cqh) {
+      .game-media-viewport .drawing-canvas-frame,
+      .game-media-viewport .drawing-preview-frame {
+        width: min(100cqw, calc(100cqh * 4 / 3));
+      }
+    }
+  }
+}
+
+@media (min-width: 900px) and (max-height: 800px) {
+  .game-phase-layout {
+    padding: 0.45rem;
+    gap: 0.45rem;
+  }
+
+  .game-prompt-header {
+    padding: 0.45rem 0.65rem;
+    gap: 0.25rem;
+  }
+
+  .game-prompt-header .card-label {
+    margin-bottom: 0.15rem;
+  }
+
+  .game-prompt-text {
+    font-size: clamp(0.96rem, 1.35vw, 1.15rem);
+    line-height: 1.2;
+  }
+
+  .game-prompt-header__question p {
+    font-size: 0.8rem;
+    line-height: 1.15;
+  }
+
+  .game-prompt-header .scale-gauge__labels {
+    margin-bottom: 0.18rem;
+    font-size: 0.7rem;
+  }
+
+  .game-prompt-header .scale-gauge__track-wrap--with-marker {
+    padding-top: 0.68rem;
+  }
+
+  .game-prompt-header .scale-gauge--full:not(.guess-scale) .scale-gauge__track {
+    height: 1.5rem;
+  }
+
+  .game-prompt-header .scale-gauge__ticks {
+    margin-top: 0.2rem;
+    font-size: 0.62rem;
+  }
+
+  .game-prompt-header .guess-scale__full-options {
+    height: 3rem;
+  }
+
+  .game-prompt-header .game-prompt-value {
+    padding-block: 0.25rem;
+    font-size: 0.78rem;
+  }
+
+  .game-prompt-header .game-prompt-value strong {
+    font-size: 1.05rem;
+  }
+
+  .game-phase-layout__sidebar {
+    padding: 0.45rem;
+    gap: 0.38rem;
+  }
+
+  .game-status-panel > div {
+    padding-block: 0.3rem;
+  }
+
+  .game-sidebar-section h2,
+  .game-sidebar-card h2,
+  .drawing-editor-heading h2,
+  .reveal-results h2 {
+    margin-block: 0.18rem 0.35rem;
+    font-size: 0.88rem;
+  }
+
+  .drawing-editor-controls .drawing-toolbar {
+    padding: 0.45rem;
+    gap: 0.35rem;
+  }
+
+  .drawing-editor-controls .toolbar-group legend {
+    margin-bottom: 0.18rem;
+  }
+
+  .drawing-editor-controls .drawing-submit-area {
+    gap: 0.25rem;
+  }
+
+  .drawing-editor-controls .drawing-submit-area p,
+  .drawing-editor-controls .game-sidebar-leave p {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .scale-gauge--compact .scale-gauge__value-text {
+    margin-top: 0.4rem;
+  }
+
+  .reveal-result-list li {
+    padding-block: 0.45rem;
+  }
+}
+
+@media (min-width: 900px) and (max-height: 760px) {
+  .game-phase-layout {
+    padding: 0.38rem;
+    gap: 0.38rem;
+  }
+
+  .game-prompt-header {
+    padding: 0.35rem 0.55rem;
+    gap: 0.18rem;
+  }
+
+  .game-prompt-text {
+    font-size: 0.92rem;
+    line-height: 1.15;
+  }
+
+  .game-prompt-header .scale-gauge--full:not(.guess-scale) .scale-gauge__track {
+    height: 1.35rem;
+  }
+
+  .game-prompt-header .guess-scale__full-options {
+    height: 3rem;
+  }
+}
+
+@media (min-width: 900px) and (max-height: 650px) {
+  .game-phase-layout__sidebar {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+  }
+}
+
+@media (max-width: 899px) {
+  .app-shell--active {
+    height: auto;
+    overflow: visible;
+  }
+
+  .game-phase-layout {
+    height: auto;
+    overflow: visible;
+  }
+
+  .game-phase-layout__body,
+  .game-phase-layout__main,
+  .game-phase-layout__sidebar,
+  .game-media-viewport,
+  .reveal-sidebar {
+    height: auto;
+    overflow: visible;
+    container-type: normal;
+  }
+
+  .game-media-viewport .drawing-canvas-frame,
+  .game-media-viewport .drawing-preview-frame {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .drawing-preview {
+    width: 100%;
+  }
+
+  .reveal-results {
+    overflow: visible;
+  }
+
+  .reveal-result-list {
+    overflow: visible;
   }
 }
 
