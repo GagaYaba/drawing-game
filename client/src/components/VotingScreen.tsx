@@ -16,6 +16,7 @@ import {
   GamePromptValue,
 } from "./game/GamePromptHeader";
 import { GameStatusPanel } from "./game/GameStatusPanel";
+import { Mascot } from "./Mascot";
 import { DisconnectedPlayersNotice } from "./PlayerConnectionStatus";
 import { GuessScale } from "./scale/GuessScale.js";
 import { ScaleGauge } from "./scale/ScaleGauge";
@@ -193,6 +194,13 @@ export function VotingScreen({
             className="game-sidebar-section voting-wait-state"
             aria-labelledby="drawer-vote-title"
           >
+            <Mascot
+              character="pig"
+              expression="surprised"
+              size="sm"
+              decorative
+              className="voting-state-mascot voting-state-mascot--drawer-waiting"
+            />
             <p className="card-label">Vote en cours</p>
             <h2 id="drawer-vote-title">
               Les autres joueurs essaient de deviner votre niveau.
@@ -204,6 +212,13 @@ export function VotingScreen({
             className="game-sidebar-section submitted-guess-card voting-wait-state"
             aria-labelledby="submitted-guess-title"
           >
+            <Mascot
+              character="pig"
+              expression="happy"
+              size="sm"
+              decorative
+              className="voting-state-mascot voting-state-mascot--submitted"
+            />
             <p className="card-label">Estimation validée</p>
             <h2 id="submitted-guess-title">Votre réponse est enregistrée.</h2>
             <p>En attente des autres joueurs…</p>
@@ -213,6 +228,13 @@ export function VotingScreen({
             className="game-sidebar-section guess-submit-panel"
             aria-label="Validation de l’estimation"
           >
+            <Mascot
+              character="poop"
+              expression="confused"
+              size="sm"
+              decorative
+              className="voting-state-mascot voting-state-mascot--choosing"
+            />
             {guessState.error !== null && (
               <p
                 className="form-message form-message--error guess-error"

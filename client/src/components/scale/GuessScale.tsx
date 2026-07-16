@@ -1,5 +1,6 @@
 import type { CSSProperties } from "react";
 
+import { Mascot } from "../Mascot";
 import {
   getScaleGaugeMarkerPosition,
   isScaleGaugeValue,
@@ -77,73 +78,91 @@ export function GuessScale({
       aria-label={accessibleLabel}
       aria-disabled={disabled}
     >
-      <div className="scale-gauge__labels" aria-hidden="true">
-        <span>{lowLabel}</span>
-        <span>{highLabel}</span>
-      </div>
+      <div className="scale-gauge__endpoint-layout">
+        <Mascot
+          character="poop"
+          expression="neutral"
+          size={size === "compact" ? "xs" : "sm"}
+          decorative
+          className="scale-gauge__mascot scale-gauge__mascot--low"
+        />
+        <div className="scale-gauge__core">
+          <div className="scale-gauge__labels" aria-hidden="true">
+            <span>{lowLabel}</span>
+            <span>{highLabel}</span>
+          </div>
 
-      {size === "compact" ? (
-        <>
-          <div
-            className={
-              markerPosition === null
-                ? "scale-gauge__track-wrap guess-scale__track-wrap"
-                : "scale-gauge__track-wrap scale-gauge__track-wrap--with-marker guess-scale__track-wrap"
-            }
-            style={markerStyle}
-          >
-            {markerPosition !== null && (
-              <span className="scale-gauge__marker" aria-hidden="true" />
-            )}
+          {size === "compact" ? (
+            <>
+              <div
+                className={
+                  markerPosition === null
+                    ? "scale-gauge__track-wrap guess-scale__track-wrap"
+                    : "scale-gauge__track-wrap scale-gauge__track-wrap--with-marker guess-scale__track-wrap"
+                }
+                style={markerStyle}
+              >
+                {markerPosition !== null && (
+                  <span className="scale-gauge__marker" aria-hidden="true" />
+                )}
+                <div
+                  className="scale-gauge__track guess-scale__visual-track"
+                  aria-hidden="true"
+                >
+                  {SCALE_GAUGE_LEVELS.map((level) => (
+                    <span className="scale-gauge__segment" key={level} />
+                  ))}
+                </div>
+              </div>
+              <div className="guess-scale__option-grid">{options}</div>
+            </>
+          ) : (
             <div
-              className="scale-gauge__track guess-scale__visual-track"
-              aria-hidden="true"
+              className={
+                markerPosition === null
+                  ? "scale-gauge__track-wrap guess-scale__track-wrap guess-scale__full-control"
+                  : "scale-gauge__track-wrap scale-gauge__track-wrap--with-marker guess-scale__track-wrap guess-scale__full-control"
+              }
+              style={markerStyle}
             >
-              {SCALE_GAUGE_LEVELS.map((level) => (
-                <span className="scale-gauge__segment" key={level} />
-              ))}
+              {markerPosition !== null && (
+                <span className="scale-gauge__marker" aria-hidden="true" />
+              )}
+              <div
+                className="scale-gauge__track guess-scale__visual-track guess-scale__full-visual"
+                aria-hidden="true"
+              >
+                {SCALE_GAUGE_LEVELS.map((level) => (
+                  <span className="scale-gauge__segment" key={level} />
+                ))}
+              </div>
+              <div className="scale-gauge__track guess-scale__track guess-scale__full-options">
+                {options}
+              </div>
             </div>
-          </div>
-          <div className="guess-scale__option-grid">{options}</div>
-        </>
-      ) : (
-        <div
-          className={
-            markerPosition === null
-              ? "scale-gauge__track-wrap guess-scale__track-wrap guess-scale__full-control"
-              : "scale-gauge__track-wrap scale-gauge__track-wrap--with-marker guess-scale__track-wrap guess-scale__full-control"
-          }
-          style={markerStyle}
-        >
-          {markerPosition !== null && (
-            <span className="scale-gauge__marker" aria-hidden="true" />
           )}
-          <div
-            className="scale-gauge__track guess-scale__visual-track guess-scale__full-visual"
-            aria-hidden="true"
-          >
-            {SCALE_GAUGE_LEVELS.map((level) => (
-              <span className="scale-gauge__segment" key={level} />
-            ))}
-          </div>
-          <div className="scale-gauge__track guess-scale__track guess-scale__full-options">
-            {options}
-          </div>
-        </div>
-      )}
 
-      {showValueText && validValue !== null && (
-        <p
-          className="scale-gauge__value-text guess-scale__value-text"
-          role="status"
-          aria-live="polite"
-          aria-atomic="true"
-        >
-          <span>{valueTextLabel} :</span>
-          <strong>{validValue}</strong>
-          <span>/ 10</span>
-        </p>
-      )}
+          {showValueText && validValue !== null && (
+            <p
+              className="scale-gauge__value-text guess-scale__value-text"
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+            >
+              <span>{valueTextLabel} :</span>
+              <strong>{validValue}</strong>
+              <span>/ 10</span>
+            </p>
+          )}
+        </div>
+        <Mascot
+          character="pig"
+          expression="neutral"
+          size={size === "compact" ? "xs" : "sm"}
+          decorative
+          className="scale-gauge__mascot scale-gauge__mascot--high"
+        />
+      </div>
     </div>
   );
 }

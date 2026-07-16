@@ -7,6 +7,7 @@ import type { PendingRoomAction } from "../hooks/useRoomSession";
 import { GameLeaderboard } from "./game/GameLeaderboard";
 import { GameLeaveAction } from "./game/GameLeaveAction";
 import { GamePhaseLayout } from "./game/GamePhaseLayout";
+import { Mascot } from "./Mascot";
 import { DisconnectedPlayersNotice } from "./PlayerConnectionStatus";
 
 interface FinishedScreenProps {
@@ -120,7 +121,7 @@ export function FinishedScreen({
                 : "Une première place partagée"}
             </h2>
             <div className="finished-winners__list">
-              {finished.winners.map((winner) => (
+              {finished.winners.map((winner, winnerIndex) => (
                 <article
                   key={winner.id}
                   className={
@@ -129,6 +130,23 @@ export function FinishedScreen({
                       : "finished-winner-card"
                   }
                 >
+                  {finished.winners.length === 1 ? (
+                    <Mascot
+                      character="pig"
+                      expression="formal"
+                      size="md"
+                      decorative
+                      className="finished-winner-mascot finished-winner-mascot--unique"
+                    />
+                  ) : (
+                    <Mascot
+                      character={winnerIndex % 2 === 0 ? "pig" : "poop"}
+                      expression="happy"
+                      size="xs"
+                      decorative
+                      className="finished-winner-mascot finished-winner-mascot--tie"
+                    />
+                  )}
                   <span aria-hidden="true">★</span>
                   <strong>{winner.nickname}</strong>
                   <p>{formatPoints(winner.score)}</p>
@@ -168,6 +186,13 @@ export function FinishedScreen({
           <h2 id="finished-rematch-title">Une nouvelle partie ?</h2>
           {isHost ? (
             <>
+              <Mascot
+                character="pig"
+                expression="jump"
+                size="sm"
+                decorative
+                className="finished-rematch-mascot finished-rematch-mascot--jump"
+              />
               <p id="finished-rematch-description">
                 Retrouvez le même groupe dans le lobby et préparez une nouvelle
                 partie.

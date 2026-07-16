@@ -14,6 +14,11 @@ import {
   GamePromptValue,
 } from "./game/GamePromptHeader";
 import { GameStatusPanel } from "./game/GameStatusPanel";
+import {
+  Mascot,
+  type MascotCharacter,
+  type MascotExpression,
+} from "./Mascot";
 import { DisconnectedPlayersNotice } from "./PlayerConnectionStatus";
 import { ScaleGauge } from "./scale/ScaleGauge";
 
@@ -27,6 +32,81 @@ interface RevealScreenProps {
   isConnectionBlocked?: boolean;
   onContinueGame: () => boolean;
   onLeaveRoom: () => void;
+}
+
+export interface RevealMascotReaction {
+  character: MascotCharacter;
+  expression: MascotExpression;
+  modifier: string;
+}
+
+export function getGuessResultMascotReaction(
+  distance: number,
+): RevealMascotReaction {
+  if (distance === 0) {
+    return {
+      character: "pig",
+      expression: "dance",
+      modifier: "exact",
+    };
+  }
+
+  if (distance === 1) {
+    return {
+      character: "pig",
+      expression: "happy",
+      modifier: "close",
+    };
+  }
+
+  if (distance <= 3) {
+    return {
+      character: "pig",
+      expression: "surprised",
+      modifier: "near",
+    };
+  }
+
+  if (distance === 4) {
+    return {
+      character: "poop",
+      expression: "confused",
+      modifier: "far",
+    };
+  }
+
+  return {
+    character: "poop",
+    expression: "sad",
+    modifier: "very-far",
+  };
+}
+
+export function getDrawerResultMascotReaction(
+  closeGuessCount: number,
+  totalGuessCount: number,
+): RevealMascotReaction {
+  if (closeGuessCount === 0) {
+    return {
+      character: "poop",
+      expression: "sad",
+      modifier: "none-close",
+    };
+  }
+
+  if (closeGuessCount >= Math.ceil(totalGuessCount / 2)) {
+    return {
+      character: "pig",
+      expression: "dance",
+      modifier: "many-close",
+    };
+  }
+
+  return {
+    character: "pig",
+    expression: "surprised",
+    modifier: "some-close",
+  };
 }
 
 function formatPoints(points: number) {
@@ -77,6 +157,13 @@ export function RevealScreen({
     reveal?.nextDrawer === null
       ? "Voir le classement final"
       : "Lancer le prochain tour";
+  const drawerReaction =
+    reveal === null
+      ? null
+      : getDrawerResultMascotReaction(
+          reveal.drawerResult.closeGuessCount,
+          reveal.guesses.length,
+        );
 
   return (
     <GamePhaseLayout
@@ -148,6 +235,15 @@ export function RevealScreen({
                 className="game-sidebar-card reveal-drawer-result"
                 aria-labelledby="drawer-result-title"
               >
+                {drawerReaction !== null && (
+                  <Mascot
+                    character={drawerReaction.character}
+                    expression={drawerReaction.expression}
+                    size="sm"
+                    decorative
+                    className={`reveal-reaction-mascot reveal-reaction-mascot--drawer reveal-reaction-mascot--${drawerReaction.modifier}`}
+                  />
+                )}
                 <p className="card-label">Points du dessinateur</p>
                 <h2 id="drawer-result-title">
                   {drawerResultTitle(reveal.drawerResult, currentPlayerId)}
@@ -176,27 +272,50 @@ export function RevealScreen({
                   aria-label="Estimations et points gagnés pendant le tour"
                   tabIndex={0}
                 >
-                  {reveal.guesses.map((guess) => (
-                    <li key={guess.player.id}>
-                      <span className="reveal-player-name">
-                        {guess.player.nickname}
-                      </span>
-                      <span className="reveal-guess-value">
-                        {guess.value} / 10
-                      </span>
-                      <strong className="reveal-distance">
-                        {guess.distance === 0
-                          ? "Exact !"
-                          : `Écart : ${guess.distance}`}
-                      </strong>
-                      <strong className="reveal-points-earned">
-                        +{formatPoints(guess.pointsEarned)}
-                      </strong>
-                      <span className="reveal-player-total">
-                        Total : {formatPoints(guess.totalScore)}
-                      </span>
-                    </li>
-                  ))}
+                  {reveal.guesses.map((guess) => {
+                    const reaction =
+                      guess.player.id === currentPlayerId
+                        ? getGuessResultMascotReaction(guess.distance)
+                        : null;
+
+                    return (
+                      <li
+                        key={guess.player.id}
+                        className={
+                          reaction === null
+                            ? undefined
+                            : `reveal-result-list__item reveal-result-list__item--current reveal-result-list__item--${reaction.modifier}`
+                        }
+                      >
+                        <span className="reveal-player-name">
+                          {reaction !== null && (
+                            <Mascot
+                              character={reaction.character}
+                              expression={reaction.expression}
+                              size="xs"
+                              decorative
+                              className={`reveal-reaction-mascot reveal-reaction-mascot--guess reveal-reaction-mascot--${reaction.modifier}`}
+                            />
+                          )}
+                          {guess.player.nickname}
+                        </span>
+                        <span className="reveal-guess-value">
+                          {guess.value} / 10
+                        </span>
+                        <strong className="reveal-distance">
+                          {guess.distance === 0
+                            ? "Exact !"
+                            : `Écart : ${guess.distance}`}
+                        </strong>
+                        <strong className="reveal-points-earned">
+                          +{formatPoints(guess.pointsEarned)}
+                        </strong>
+                        <span className="reveal-player-total">
+                          Total : {formatPoints(guess.totalScore)}
+                        </span>
+                      </li>
+                    );
+                  })}
                 </ol>
               </section>
 

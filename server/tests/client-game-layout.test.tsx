@@ -57,6 +57,9 @@ describe("AppLayout", () => {
     expect(markup).toContain('<header class="hero">');
     expect(markup).toContain("Jeu multijoueur");
     expect(markup).toContain("Drawing Scale Game");
+    expect(markup).toContain('class="game-logo"');
+    expect(markup).toContain("<span>Drawing</span>");
+    expect(markup).toContain("Scale Game");
     expect(markup).toContain("Diagnostic technique");
     expect(markup).toContain(
       "<footer>React · Express · Socket.IO · TypeScript</footer>",
@@ -109,6 +112,12 @@ describe("AppLayout", () => {
     );
     expect(GLOBAL_STYLES).toMatch(
       /@media \(min-width: 900px\)[\s\S]*?\.game-phase-layout__sidebar\.finished-sidebar\s*\{[\s\S]*?overflow: hidden;/,
+    );
+  });
+
+  it("désactive les animations des mascottes en mouvement réduit", () => {
+    expect(GLOBAL_STYLES).toMatch(
+      /@media \(prefers-reduced-motion: reduce\)[\s\S]*?animation: none/u,
     );
   });
 });

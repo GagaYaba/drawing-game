@@ -1,4 +1,5 @@
 import type { PendingRoomAction } from "../hooks/useRoomSession";
+import { Mascot } from "./Mascot";
 
 interface HomeScreenProps {
   nickname: string;
@@ -31,11 +32,19 @@ export function HomeScreen({
   };
 
   return (
-    <section
-      className="game-card welcome-card"
-      aria-labelledby="welcome-title"
-      aria-busy={isPending}
-    >
+    <div className="home-table-layout">
+      <Mascot
+        character="poop"
+        expression="neutral"
+        size="lg"
+        decorative
+        className="home-table-layout__mascot home-table-layout__mascot--low mascot--arrive"
+      />
+      <section
+        className="game-card welcome-card"
+        aria-labelledby="welcome-title"
+        aria-busy={isPending}
+      >
       <div className="section-heading">
         <div>
           <p className="eyebrow">Nouveau salon</p>
@@ -62,11 +71,21 @@ export function HomeScreen({
         <p className="field-hint">Entre 2 et 20 caractères.</p>
       </div>
 
-      {errorMessage !== null && (
-        <p className="form-message form-message--error" id="room-form-error" role="alert">
-          {errorMessage}
-        </p>
-      )}
+        {errorMessage !== null && (
+          <p
+            className="form-message form-message--error form-message--with-mascot"
+            id="room-form-error"
+            role="alert"
+          >
+            <Mascot
+              character="poop"
+              expression={roomCode.trim() === "" ? "confused" : "angry"}
+              size="xs"
+              decorative
+            />
+            <span>{errorMessage}</span>
+          </p>
+        )}
 
       <div className="room-actions">
         <section className="action-card" aria-labelledby="create-title">
@@ -130,6 +149,14 @@ export function HomeScreen({
               : "Connexion au salon en cours."}
         </p>
       )}
-    </section>
+      </section>
+      <Mascot
+        character="pig"
+        expression="neutral"
+        size="lg"
+        decorative
+        className="home-table-layout__mascot home-table-layout__mascot--high mascot--arrive"
+      />
+    </div>
   );
 }

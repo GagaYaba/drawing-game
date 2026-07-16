@@ -82,6 +82,12 @@ describe("GuessScale markup", () => {
     );
     expect(markup).toContain(LOW_LABEL);
     expect(markup).toContain(HIGH_LABEL);
+    expect(markup).toContain(
+      'src="/mascots/poop/neutral.png" alt="" aria-hidden="true"',
+    );
+    expect(markup).toContain(
+      'src="/mascots/pig/neutral.png" alt="" aria-hidden="true"',
+    );
 
     for (let level = 1; level <= 10; level += 1) {
       expect(markup).toContain(`aria-label="Choisir ${level} sur 10"`);

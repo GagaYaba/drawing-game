@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import type { PublicRoomState } from "@drawing-game/shared";
 
 import type { PendingRoomAction } from "../hooks/useRoomSession";
+import { Mascot } from "./Mascot";
 import { PlayerConnectionStatus } from "./PlayerConnectionStatus";
 
 interface LobbyScreenProps {
@@ -44,6 +45,32 @@ async function copyToClipboard(value: string) {
   } finally {
     textArea.remove();
   }
+}
+
+function getConnectedPlayerMascot(
+  player: PublicRoomState["players"][number],
+) {
+  if (player.isHost) {
+    return {
+      character: "pig",
+      expression: "formal",
+      state: "host",
+    } as const;
+  }
+
+  if (player.isReady) {
+    return {
+      character: "pig",
+      expression: "jump",
+      state: "ready",
+    } as const;
+  }
+
+  return {
+    character: "poop",
+    expression: "hide",
+    state: "not-ready",
+  } as const;
 }
 
 export function LobbyScreen({
@@ -113,6 +140,31 @@ export function LobbyScreen({
         : room.playerCount < room.minimumPlayersToStart
           ? `Il faut au moins ${room.minimumPlayersToStart} joueurs et tout le monde doit être prêt.`
           : "Le nombre de joueurs est suffisant. Tout le monde doit encore être prêt.";
+
+  const readinessMascot =
+    reconnectingPlayerCount > 0
+      ? {
+          character: "poop",
+          expression: "confused",
+          state: "reconnecting",
+        } as const
+      : room.canStart
+        ? {
+            character: "pig",
+            expression: "happy",
+            state: "ready",
+          } as const
+        : room.playerCount < room.minimumPlayersToStart
+          ? {
+              character: "poop",
+              expression: "surprised",
+              state: "insufficient",
+            } as const
+          : {
+              character: "poop",
+              expression: "hide",
+              state: "waiting",
+            } as const;
 
   return (
     <section
@@ -202,6 +254,13 @@ export function LobbyScreen({
                 </span>
                 {player.isConnected ? (
                   <span className={`ready-status ${player.isReady ? "ready-status--yes" : ""}`}>
+                    <Mascot
+                      character={getConnectedPlayerMascot(player).character}
+                      expression={getConnectedPlayerMascot(player).expression}
+                      size="xs"
+                      decorative
+                      className={`lobby-player-mascot lobby-player-mascot--${getConnectedPlayerMascot(player).state}`}
+                    />
                     <span aria-hidden="true">{player.isReady ? "✓" : "○"}</span>
                     {player.isReady ? "Prêt" : "Pas prêt"}
                   </span>
@@ -214,8 +273,17 @@ export function LobbyScreen({
         </section>
 
         <aside className={`readiness-card ${room.canStart ? "readiness-card--ready" : ""}`} aria-labelledby="readiness-title">
-          <span className="readiness-icon" aria-hidden="true">
-            {room.canStart ? "✓" : "…"}
+          <span className="readiness-card__visual" aria-hidden="true">
+            <Mascot
+              character={readinessMascot.character}
+              expression={readinessMascot.expression}
+              size="sm"
+              decorative
+              className={`readiness-mascot readiness-mascot--${readinessMascot.state}`}
+            />
+            <span className="readiness-icon" aria-hidden="true">
+              {room.canStart ? "✓" : "…"}
+            </span>
           </span>
           <div>
             <h3 id="readiness-title">Préparation de la partie</h3>

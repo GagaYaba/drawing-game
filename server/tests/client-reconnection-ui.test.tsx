@@ -70,6 +70,13 @@ describe("ConnectionRecoveryOverlay", () => {
     expect(markup).toContain('role="status"');
     expect(markup).toContain('aria-live="assertive"');
     expect(markup).toContain('aria-atomic="true"');
+    expect(markup).toContain('src="/mascots/poop/confused.png"');
+    expect(markup).toContain(
+      'data-character="poop" data-expression="confused"',
+    );
+    expect(markup).toContain(
+      "connection-recovery-mascot--disconnected",
+    );
     expect(markup).not.toContain(SESSION_TOKEN);
   });
 
@@ -96,6 +103,13 @@ describe("ConnectionRecoveryOverlay", () => {
     );
     expect(getVisibleText(restoringMarkup)).toContain(
       "Votre place et votre progression sont en cours de récupération.",
+    );
+    expect(restoringMarkup).toContain('src="/mascots/pig/fly.png"');
+    expect(restoringMarkup).toContain(
+      'data-character="pig" data-expression="fly"',
+    );
+    expect(restoringMarkup).toContain(
+      "connection-recovery-mascot--restoring",
     );
     expect(restoringMarkup).not.toContain(
       "Cette annonce reste masquée pendant la restauration.",
@@ -141,6 +155,11 @@ describe("ConnectionRecoveryOverlay", () => {
     );
     expect(text).toContain("Réessayer la restauration");
     expect(markup).toContain('type="button"');
+    expect(markup).toContain('src="/mascots/poop/sad.png"');
+    expect(markup).toContain(
+      'data-character="poop" data-expression="sad"',
+    );
+    expect(markup).toContain("connection-recovery-mascot--failed");
   });
 });
 
@@ -260,6 +279,78 @@ describe("LobbyScreen avec un joueur en reconnexion", () => {
     );
     expect(text).not.toContain("Il faut au moins 3 joueurs");
     expect(markup).toContain("player-row--disconnected");
+  });
+
+  it("conserve les initiales et les statuts textuels avec les mascottes du lobby", () => {
+    const room: PublicRoomState = {
+      code: "ABCD2",
+      players: [
+        createPlayer({
+          id: "host",
+          nickname: "Camille",
+          isHost: true,
+        }),
+        createPlayer({
+          id: "ready",
+          nickname: "Élodie",
+        }),
+        createPlayer({
+          id: "not-ready",
+          nickname: "Noé",
+          isReady: false,
+        }),
+      ],
+      playerCount: 3,
+      maxPlayers: 8,
+      minimumPlayersToStart: 3,
+      allPlayersReady: false,
+      canStart: false,
+      game: null,
+    };
+    const markup = renderToStaticMarkup(
+      <LobbyScreen
+        room={room}
+        currentPlayerId="host"
+        pendingAction={null}
+        errorMessage={null}
+        noticeMessage={null}
+        onSetReady={() => undefined}
+        onStartGame={() => undefined}
+        onLeaveRoom={() => undefined}
+      />,
+    );
+    const text = getVisibleText(markup);
+
+    expect(text).toContain("Hôte");
+    expect(text).toContain("Prêt");
+    expect(text).toContain("Pas prêt");
+    expect(markup).toContain(
+      '<span class="player-avatar" aria-hidden="true">C</span>',
+    );
+    expect(markup).toContain(
+      '<span class="player-avatar" aria-hidden="true">É</span>',
+    );
+    expect(markup).toContain(
+      '<span class="player-avatar" aria-hidden="true">N</span>',
+    );
+
+    expect(markup).toContain("lobby-player-mascot--host");
+    expect(markup).toContain('src="/mascots/pig/formal.png"');
+    expect(markup).toContain(
+      'data-character="pig" data-expression="formal"',
+    );
+
+    expect(markup).toContain("lobby-player-mascot--ready");
+    expect(markup).toContain('src="/mascots/pig/jump.png"');
+    expect(markup).toContain(
+      'data-character="pig" data-expression="jump"',
+    );
+
+    expect(markup).toContain("lobby-player-mascot--not-ready");
+    expect(markup).toContain('src="/mascots/poop/hidden.png"');
+    expect(markup).toContain(
+      'data-character="poop" data-expression="hide"',
+    );
   });
 });
 

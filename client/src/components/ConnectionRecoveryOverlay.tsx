@@ -1,4 +1,5 @@
 import type { ClientConnectionStatus } from "../hooks/useRoomSession";
+import { Mascot } from "./Mascot";
 
 interface ConnectionRecoveryOverlayProps {
   status: ClientConnectionStatus;
@@ -18,6 +19,23 @@ export function ConnectionRecoveryOverlay({
   const restoreFailed = status === "restore-failed";
   const isVisible =
     hasStoredSession && (isDisconnected || isRestoring || restoreFailed);
+  const recoveryMascot = restoreFailed
+    ? {
+        character: "poop",
+        expression: "sad",
+        state: "failed",
+      } as const
+    : isDisconnected
+      ? {
+          character: "poop",
+          expression: "confused",
+          state: "disconnected",
+        } as const
+      : {
+          character: "pig",
+          expression: "fly",
+          state: "restoring",
+        } as const;
 
   return (
     <>
@@ -39,8 +57,17 @@ export function ConnectionRecoveryOverlay({
             aria-atomic="true"
             aria-labelledby="connection-recovery-title"
           >
-            <span className="connection-recovery-icon" aria-hidden="true">
-              …
+            <span
+              className={`connection-recovery-icon connection-recovery-icon--${recoveryMascot.state}`}
+              aria-hidden="true"
+            >
+              <Mascot
+                character={recoveryMascot.character}
+                expression={recoveryMascot.expression}
+                size="sm"
+                decorative
+                className={`connection-recovery-mascot connection-recovery-mascot--${recoveryMascot.state}`}
+              />
             </span>
             <div>
               <p className="card-label">Connexion au salon</p>

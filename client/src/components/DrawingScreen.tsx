@@ -13,6 +13,7 @@ import {
   GamePromptValue,
 } from "./game/GamePromptHeader";
 import { GameStatusPanel } from "./game/GameStatusPanel";
+import { Mascot } from "./Mascot";
 import { DisconnectedPlayersNotice } from "./PlayerConnectionStatus";
 import { ScaleGauge } from "./scale/ScaleGauge";
 
@@ -44,6 +45,8 @@ export function DrawingScreen({
   const isDrawer = currentPlayerId === game.currentDrawer.id;
   const isPending = pendingAction !== null || isConnectionBlocked;
   const isSubmitting = pendingAction === "submitDrawing";
+  const drawingMascotCharacter =
+    game.currentTurnNumber % 2 === 0 ? "pig" : "poop";
   const promptHeader = (
     <GamePromptHeader
       statement={game.prompt.statement}
@@ -99,6 +102,13 @@ export function DrawingScreen({
             <>
               <GameStatusPanel game={game} />
               <DisconnectedPlayersNotice players={players} />
+              <Mascot
+                character={drawingMascotCharacter}
+                expression="neutral"
+                size="xs"
+                decorative
+                className="drawing-sidebar-mascot drawing-sidebar-mascot--neutral"
+              />
               {errorMessage !== null && (
                 <p
                   className="form-message form-message--error game-sidebar-message"
@@ -146,6 +156,13 @@ export function DrawingScreen({
               className="game-sidebar-card game-sidebar-card--waiting"
               aria-labelledby="drawing-wait-title"
             >
+              <Mascot
+                character={drawingMascotCharacter}
+                expression="neutral"
+                size="sm"
+                decorative
+                className="drawing-wait-mascot drawing-wait-mascot--neutral"
+              />
               <p className="card-label">Dessin en cours</p>
               <h2 id="drawing-wait-title">
                 {game.currentDrawer.nickname} dessine actuellement.

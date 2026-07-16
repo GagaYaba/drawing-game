@@ -10,6 +10,7 @@ import {
   GamePromptValue,
 } from "./game/GamePromptHeader";
 import { GameStatusPanel } from "./game/GameStatusPanel";
+import { Mascot } from "./Mascot";
 import { DisconnectedPlayersNotice } from "./PlayerConnectionStatus";
 import { ScaleGauge } from "./scale/ScaleGauge";
 
@@ -47,6 +48,8 @@ export function RoundIntroScreen({
   );
   const isDrawer = currentPlayerId === game.currentDrawer.id;
   const isPending = pendingAction !== null || isConnectionBlocked;
+  const introMascotCharacter =
+    game.currentTurnNumber % 2 === 0 ? "pig" : "poop";
 
   useEffect(() => {
     const updateCountdown = () => {
@@ -103,6 +106,13 @@ export function RoundIntroScreen({
     >
       <div className="game-phase-layout__main round-intro-stage">
         <div className="round-intro-stage__content">
+          <Mascot
+            character={introMascotCharacter}
+            expression="surprised"
+            size="md"
+            decorative
+            className="round-intro-mascot round-intro-mascot--surprised"
+          />
           <p className="card-label">Prochainement</p>
           <h2>
             {isDrawer

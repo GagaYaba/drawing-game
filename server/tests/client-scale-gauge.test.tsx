@@ -73,6 +73,25 @@ describe("ScaleGauge markup", () => {
     );
   });
 
+  it("place le caca au niveau 1 et le cochon au niveau 10 sans remplacer les graduations", () => {
+    const markup = renderGauge();
+    const poopIndex = markup.indexOf(
+      'class="mascot mascot--sm scale-gauge__mascot scale-gauge__mascot--low"',
+    );
+    const trackIndex = markup.indexOf('class="scale-gauge__core"');
+    const pigIndex = markup.indexOf(
+      'class="mascot mascot--sm scale-gauge__mascot scale-gauge__mascot--high"',
+    );
+
+    expect(markup).toContain('src="/mascots/poop/neutral.png"');
+    expect(markup).toContain('src="/mascots/pig/neutral.png"');
+    expect(poopIndex).toBeGreaterThanOrEqual(0);
+    expect(trackIndex).toBeGreaterThan(poopIndex);
+    expect(pigIndex).toBeGreaterThan(trackIndex);
+    expect(markup).toContain("<li>1</li>");
+    expect(markup).toContain("<li>10</li>");
+  });
+
   it("n’affiche aucun repère ni texte secret sans valeur", () => {
     const markup = renderGauge({ showValueText: true });
 

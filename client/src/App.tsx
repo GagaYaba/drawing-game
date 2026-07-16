@@ -6,6 +6,7 @@ import {
 import { ConnectionPanel } from "./components/ConnectionPanel";
 import { DrawingScreen } from "./components/DrawingScreen";
 import { FinishedScreen } from "./components/FinishedScreen";
+import { GameLogo } from "./components/GameLogo";
 import { HealthCheck } from "./components/HealthCheck";
 import { HomeScreen } from "./components/HomeScreen";
 import { LobbyScreen } from "./components/LobbyScreen";
@@ -16,26 +17,27 @@ import { useRoomSession } from "./hooks/useRoomSession";
 
 interface AppLayoutProps {
   isGameActive: boolean;
+  isLobby?: boolean;
   children: ReactNode;
 }
 
 export function AppLayout({
   isGameActive,
+  isLobby = false,
   children,
 }: AppLayoutProps) {
+  const shellClassName = isGameActive
+    ? "app-shell app-shell--active"
+    : isLobby
+      ? "app-shell app-shell--lobby"
+      : "app-shell";
+
   return (
-    <main
-      className={
-        isGameActive ? "app-shell app-shell--active" : "app-shell"
-      }
-    >
+    <main className={shellClassName}>
       {!isGameActive && (
         <header className="hero">
-          <span className="hero-mark" aria-hidden="true">
-            ✦
-          </span>
           <p className="kicker">Jeu multijoueur</p>
-          <h1>Drawing Scale Game</h1>
+          <GameLogo />
           <p className="subtitle">
             Réunissez votre groupe dans un salon avant de commencer à dessiner.
           </p>
@@ -81,7 +83,10 @@ export function App() {
 
   return (
     <>
-      <AppLayout isGameActive={isGameActive}>
+      <AppLayout
+        isGameActive={isGameActive}
+        isLobby={room !== null && !isGameActive}
+      >
         {room === null ? (
           <HomeScreen
             nickname={roomSession.nickname}

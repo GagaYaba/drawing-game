@@ -9,7 +9,11 @@ import { describe, expect, it } from "vitest";
 
 import { DrawingScreen } from "../../client/src/components/DrawingScreen.js";
 import { FinishedScreen } from "../../client/src/components/FinishedScreen.js";
-import { RevealScreen } from "../../client/src/components/RevealScreen.js";
+import {
+  getDrawerResultMascotReaction,
+  getGuessResultMascotReaction,
+  RevealScreen,
+} from "../../client/src/components/RevealScreen.js";
 import { RoundIntroScreen } from "../../client/src/components/RoundIntroScreen.js";
 import { VotingScreen } from "../../client/src/components/VotingScreen.js";
 import type { ClientGuessState } from "../../client/src/hooks/useRoomSession.js";
@@ -543,6 +547,12 @@ describe("VotingScreen", () => {
     expect(markup).toContain("guess-scale__full-options");
     expect(markup).toContain("Valider mon estimation");
     expect(markup).not.toContain("scale-gauge__marker");
+    expect(markup).toContain(
+      "voting-state-mascot voting-state-mascot--choosing",
+    );
+    expect(markup).toContain(
+      'data-character="poop" data-expression="confused"',
+    );
   });
 
   it("active la validation et matérialise uniquement le choix local", () => {
@@ -604,6 +614,12 @@ describe("VotingScreen", () => {
     expect(markup).not.toContain("guess-submit-button");
     expect(getVotingSidebar(markup)).not.toContain("guess-scale");
     expect(getVotingSidebar(markup)).toContain('class="vote-progress"');
+    expect(markup).toContain(
+      "voting-state-mascot voting-state-mascot--submitted",
+    );
+    expect(markup).toContain(
+      'data-character="pig" data-expression="happy"',
+    );
   });
 
   it("n'expose publiquement que la progression agrégée pendant VOTING", () => {
@@ -654,10 +670,56 @@ describe("VotingScreen", () => {
     expect(text).toContain("1 estimation reçue sur 2");
     expect(getVotingSidebar(markup)).toContain("voting-wait-state");
     expect(getVotingSidebar(markup)).toContain('class="vote-progress"');
+    expect(markup).toContain(
+      "voting-state-mascot voting-state-mascot--drawer-waiting",
+    );
+    expect(markup).toContain(
+      'data-character="pig" data-expression="surprised"',
+    );
   });
 });
 
 describe("RevealScreen", () => {
+  it.each([
+    [0, "pig", "dance", "exact"],
+    [1, "pig", "happy", "close"],
+    [2, "pig", "surprised", "near"],
+    [3, "pig", "surprised", "near"],
+    [4, "poop", "confused", "far"],
+    [5, "poop", "sad", "very-far"],
+    [9, "poop", "sad", "very-far"],
+  ] as const)(
+    "associe la distance %i à %s/%s",
+    (distance, character, expression, modifier) => {
+      expect(getGuessResultMascotReaction(distance)).toEqual({
+        character,
+        expression,
+        modifier,
+      });
+    },
+  );
+
+  it.each([
+    [0, 3, "poop", "sad", "none-close"],
+    [1, 3, "pig", "surprised", "some-close"],
+    [1, 2, "pig", "dance", "many-close"],
+    [2, 3, "pig", "dance", "many-close"],
+  ] as const)(
+    "associe %i vote(s) proche(s) sur %i à %s/%s",
+    (closeGuessCount, totalGuessCount, character, expression, modifier) => {
+      expect(
+        getDrawerResultMascotReaction(
+          closeGuessCount,
+          totalGuessCount,
+        ),
+      ).toEqual({
+        character,
+        expression,
+        modifier,
+      });
+    },
+  );
+
   it("révèle le secret, les points et le classement dans l'ordre public", () => {
     const markup = renderToStaticMarkup(
       <RevealScreen
@@ -678,6 +740,15 @@ describe("RevealScreen", () => {
     expect(markup).toContain('class="scale-gauge__marker"');
     expect(markup).toContain("<strong>7</strong>");
     expect(text).toContain("Élodie 7 / 10 Exact ! +3 points Total : 8 points");
+    expect(markup).toContain(
+      "reveal-result-list__item reveal-result-list__item--current reveal-result-list__item--exact",
+    );
+    expect(markup).toContain(
+      "reveal-reaction-mascot reveal-reaction-mascot--guess reveal-reaction-mascot--exact",
+    );
+    expect(markup).toContain(
+      'data-character="pig" data-expression="dance"',
+    );
     expect(text).toContain("Noé 4 / 10 Écart : 3 +0 points Total : 1 point");
     expect(text).toContain(
       "1 joueur a trouvé le niveau de Camille à ±1. Camille gagne 2 points.",
@@ -809,6 +880,12 @@ describe("FinishedScreen", () => {
     expect(text).not.toContain(PROMPT_STATEMENT);
     expect(text).not.toContain("Niveau secret");
     expect(text).not.toContain("Lancer le prochain tour");
+    expect(markup).toContain(
+      "finished-winner-mascot finished-winner-mascot--unique",
+    );
+    expect(markup).toContain(
+      'data-character="pig" data-expression="formal"',
+    );
   });
 
   it("annonce correctement une égalité entre plusieurs gagnants", () => {
@@ -836,6 +913,38 @@ describe("FinishedScreen", () => {
     );
     expect(text).toContain("Gagnants");
     expect(text).toContain("Une première place partagée");
+    expect(
+      countOccurrences(
+        markup,
+        "finished-winner-mascot finished-winner-mascot--tie",
+      ),
+    ).toBe(2);
+    expect(countOccurrences(markup, 'data-expression="happy"')).toBe(2);
+  });
+
+  it("illustre la proposition de revanche sans remplacer son texte", () => {
+    const finished = createGame("FINISHED").finished;
+    if (finished === null) {
+      throw new Error("Un état final était attendu.");
+    }
+
+    const markup = renderToStaticMarkup(
+      <FinishedScreen
+        {...commonProps}
+        {...finishedCallbacks}
+        finished={finished}
+        currentPlayerId={OBSERVER_ID}
+        isHost
+      />,
+    );
+
+    expect(markup).toContain(
+      "finished-rematch-mascot finished-rematch-mascot--jump",
+    );
+    expect(markup).toContain(
+      'data-character="pig" data-expression="jump"',
+    );
+    expect(getVisibleText(markup)).toContain("Proposer une revanche");
   });
 
   it("résume une égalité large sans énumération interminable", () => {

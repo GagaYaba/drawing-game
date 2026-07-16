@@ -1,5 +1,6 @@
 import type { CSSProperties } from "react";
 
+import { Mascot } from "../Mascot";
 import {
   getScaleGaugeMarkerPosition,
   isScaleGaugeValue,
@@ -52,43 +53,61 @@ export function ScaleGauge({
       role="img"
       aria-label={accessibleLabel}
     >
-      <div className="scale-gauge__labels" aria-hidden="true">
-        <span>{lowLabel}</span>
-        <span>{highLabel}</span>
-      </div>
+      <div className="scale-gauge__endpoint-layout">
+        <Mascot
+          character="poop"
+          expression="neutral"
+          size={size === "compact" ? "xs" : "sm"}
+          decorative
+          className="scale-gauge__mascot scale-gauge__mascot--low"
+        />
+        <div className="scale-gauge__core">
+          <div className="scale-gauge__labels" aria-hidden="true">
+            <span>{lowLabel}</span>
+            <span>{highLabel}</span>
+          </div>
 
-      <div
-        className={
-          markerPosition === null
-            ? "scale-gauge__track-wrap"
-            : "scale-gauge__track-wrap scale-gauge__track-wrap--with-marker"
-        }
-        style={markerStyle}
-      >
-        {markerPosition !== null && (
-          <span className="scale-gauge__marker" aria-hidden="true" />
-        )}
+          <div
+            className={
+              markerPosition === null
+                ? "scale-gauge__track-wrap"
+                : "scale-gauge__track-wrap scale-gauge__track-wrap--with-marker"
+            }
+            style={markerStyle}
+          >
+            {markerPosition !== null && (
+              <span className="scale-gauge__marker" aria-hidden="true" />
+            )}
 
-        <div className="scale-gauge__track" aria-hidden="true">
-          {SCALE_GAUGE_LEVELS.map((level) => (
-            <span className="scale-gauge__segment" key={level} />
-          ))}
+            <div className="scale-gauge__track" aria-hidden="true">
+              {SCALE_GAUGE_LEVELS.map((level) => (
+                <span className="scale-gauge__segment" key={level} />
+              ))}
+            </div>
+          </div>
+
+          <ol className="scale-gauge__ticks" aria-hidden="true">
+            {SCALE_GAUGE_LEVELS.map((level) => (
+              <li key={level}>{level}</li>
+            ))}
+          </ol>
+
+          {showValueText && validValue !== null && (
+            <p className="scale-gauge__value-text" aria-hidden="true">
+              <span>{valueTextLabel} :</span>
+              <strong>{validValue}</strong>
+              <span>/ 10</span>
+            </p>
+          )}
         </div>
+        <Mascot
+          character="pig"
+          expression="neutral"
+          size={size === "compact" ? "xs" : "sm"}
+          decorative
+          className="scale-gauge__mascot scale-gauge__mascot--high"
+        />
       </div>
-
-      <ol className="scale-gauge__ticks" aria-hidden="true">
-        {SCALE_GAUGE_LEVELS.map((level) => (
-          <li key={level}>{level}</li>
-        ))}
-      </ol>
-
-      {showValueText && validValue !== null && (
-        <p className="scale-gauge__value-text" aria-hidden="true">
-          <span>{valueTextLabel} :</span>
-          <strong>{validValue}</strong>
-          <span>/ 10</span>
-        </p>
-      )}
     </div>
   );
 }

@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 
 import type { PublicPlayer } from "@drawing-game/shared";
 
+import { Mascot } from "./Mascot";
+
 interface PlayerConnectionStatusProps {
   player: PublicPlayer;
   showConnected?: boolean;
@@ -52,6 +54,13 @@ export function PlayerConnectionStatus({
     <span
       className="player-connection-status player-connection-status--reconnecting"
     >
+      <Mascot
+        character="poop"
+        expression="confused"
+        size="xs"
+        decorative
+        className="player-connection-mascot player-connection-mascot--reconnecting"
+      />
       Reconnexion…
       {secondsRemaining !== null && secondsRemaining > 0
         ? ` ${secondsRemaining} s`

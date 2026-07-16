@@ -74,7 +74,7 @@ Installez les dépendances de la racine et des trois workspaces :
 npm install
 ```
 
-Le serveur utilise le port défini par la variable d'environnement `PORT`, avec `3000` comme valeur par défaut. `PLAYER_RECONNECT_GRACE_MS` configure le délai de grâce de reconnexion en millisecondes et vaut `60000` par défaut ; les valeurs acceptées vont de `0` à `2147483647`, limite sûre des timers Node.js. Les valeurs attendues sont documentées dans `.env.example` ; aucun secret statique n'est nécessaire.
+Le serveur utilise le port défini par la variable d'environnement `PORT`, avec `3000` comme valeur par défaut. `PLAYER_RECONNECT_GRACE_MS` configure le délai de grâce de reconnexion en millisecondes et vaut `60000` par défaut. Les valeurs attendues sont documentées dans `.env.example` ; aucun secret statique n'est nécessaire.
 
 ## Développement
 
@@ -343,7 +343,7 @@ npm test
 
 Cette commande lance les tests Vitest : tests unitaires de la logique des salons, de la partie, du score, des estimations, du document vectoriel et de sa géométrie, ainsi que des tests d'intégration avec un serveur sur un port éphémère et de vrais clients Socket.IO.
 
-La suite actuelle contient **360 tests**. Elle couvre notamment :
+La suite actuelle contient **311 tests**. Elle couvre notamment :
 
 - les validations strictes des salons, dessins, votes, `game:start`, `game:continue` et `game:request-rematch`, ainsi que les autorisations de l'hôte et du dessinateur ;
 - la table de points des votants, le plafond de 5 points du dessinateur et l'application atomique et unique des scores ;
@@ -417,7 +417,6 @@ Les actions utilisent également des événements typés : `room:create`, `room:
 
 Cette version ne comprend pas encore :
 
-- l'authentification et les comptes utilisateurs ;
 - une base de données ou toute autre persistance des salons ;
 - la restauration après redémarrage du serveur ;
 - la synchronisation d'une session ou d'un brouillon entre plusieurs appareils ;
