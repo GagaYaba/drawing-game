@@ -15,12 +15,19 @@ import { Server } from "socket.io";
 import { GameManager } from "./game/game-manager.js";
 import type { GameManagerOptions } from "./game/game-types.js";
 import { RoomManager } from "./rooms/room-manager.js";
+import {
+  ReconnectManager,
+  type ReconnectManagerOptions,
+} from "./sessions/reconnect-manager.js";
+import { SessionRestorationManager } from "./sessions/session-restoration.js";
 import { registerSocketHandlers } from "./socket/register-socket-handlers.js";
 
 export interface CreateDrawingGameServerOptions {
   serveClient?: boolean;
   roomManager?: RoomManager;
   gameManagerOptions?: GameManagerOptions;
+  reconnectGraceMs?: number;
+  reconnectManagerOptions?: ReconnectManagerOptions;
 }
 
 // A canonical 30,000-point drawing can exceed Engine.IO's 1 MB default once
@@ -47,6 +54,40 @@ export function createDrawingGameServer(
       io.to(roomCode).emit(SOCKET_EVENTS.ROOM_STATE, room);
     },
   });
+  const externalExpirationListener =
+    options.reconnectManagerOptions?.onPlayerExpired;
+  const reconnectManager = new ReconnectManager(roomManager, gameManager, {
+    ...options.reconnectManagerOptions,
+    graceMs:
+      options.reconnectGraceMs ??
+      options.reconnectManagerOptions?.graceMs,
+    onPlayerExpired: (result) => {
+      if (result.departure.room !== null) {
+        if (result.gameWasCancelled) {
+          io.to(result.departure.roomCode).emit(
+            SOCKET_EVENTS.GAME_CANCELLED,
+            {
+              reason: "RECONNECT_TIMEOUT",
+              message:
+                "La partie a été annulée car un joueur ne s’est pas reconnecté à temps.",
+            },
+          );
+        }
+
+        io.to(result.departure.roomCode).emit(
+          SOCKET_EVENTS.ROOM_STATE,
+          result.departure.room,
+        );
+      }
+
+      externalExpirationListener?.(result);
+    },
+  });
+  const sessionRestorationManager = new SessionRestorationManager(
+    roomManager,
+    reconnectManager,
+    { clock: options.reconnectManagerOptions?.clock },
+  );
 
   app.get("/api/health", (_request, response) => {
     const health: HealthResponse = {
@@ -61,8 +102,17 @@ export function createDrawingGameServer(
     response.status(404).json({ error: "API route not found" });
   });
 
-  registerSocketHandlers(io, roomManager, gameManager);
-  httpServer.once("close", () => gameManager.dispose());
+  registerSocketHandlers(
+    io,
+    roomManager,
+    gameManager,
+    reconnectManager,
+    sessionRestorationManager,
+  );
+  httpServer.once("close", () => {
+    reconnectManager.dispose();
+    gameManager.dispose();
+  });
 
   if (options.serveClient !== false) {
     const currentDirectory = dirname(fileURLToPath(import.meta.url));
@@ -91,5 +141,13 @@ export function createDrawingGameServer(
     }
   }
 
-  return { app, httpServer, io, roomManager, gameManager };
+  return {
+    app,
+    httpServer,
+    io,
+    roomManager,
+    gameManager,
+    reconnectManager,
+    sessionRestorationManager,
+  };
 }

@@ -59,20 +59,20 @@ function prepareRoom(playerCount = 3): PreparedRoom {
     (_, index) => `socket-${index + 1}`,
   );
   const host = roomManager.createRoom(socketIds[0]!, "J1");
-  const playerIds = [host.playerId];
+  const playerIds = [host.session.playerId];
 
   for (let index = 1; index < socketIds.length; index += 1) {
     const session = roomManager.joinRoom(
       socketIds[index]!,
       `J${index + 1}`,
-      host.roomCode,
+      host.session.roomCode,
     );
-    playerIds.push(session.playerId);
+    playerIds.push(session.session.playerId);
   }
 
   return {
     roomManager,
-    roomCode: host.roomCode,
+    roomCode: host.session.roomCode,
     socketIds,
     playerIds,
   };

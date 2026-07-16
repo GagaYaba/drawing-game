@@ -13,6 +13,7 @@ import {
   type ContinueGameSuccessData,
   type DrawingDocument,
   type GameCancelledPayload,
+  type PlayerSessionCredentials,
   type PublicGameState,
   type PublicRoomState,
   type RequestRematchSuccessData,
@@ -35,7 +36,7 @@ type DrawingGameServer = ReturnType<typeof createDrawingGameServer>;
 
 interface PreparedRoom {
   sockets: TestClient[];
-  sessions: RoomSessionData[];
+  sessions: PlayerSessionCredentials[];
   roomCode: string;
 }
 
@@ -373,21 +374,21 @@ async function prepareRoom(nicknamePrefix: string): Promise<PreparedRoom> {
     await createRoom(sockets[0]!, `${nicknamePrefix}1`),
   );
   const sessions = [
-    hostSession,
+    hostSession.session,
     expectSuccess(
       await joinRoom(
         sockets[1]!,
         `${nicknamePrefix}2`,
-        hostSession.roomCode,
+        hostSession.session.roomCode,
       ),
-    ),
+    ).session,
     expectSuccess(
       await joinRoom(
         sockets[2]!,
         `${nicknamePrefix}3`,
-        hostSession.roomCode,
+        hostSession.session.roomCode,
       ),
-    ),
+    ).session,
   ];
 
   for (const socket of sockets) {
@@ -397,7 +398,7 @@ async function prepareRoom(nicknamePrefix: string): Promise<PreparedRoom> {
   return {
     sockets,
     sessions,
-    roomCode: hostSession.roomCode,
+    roomCode: hostSession.session.roomCode,
   };
 }
 
@@ -506,6 +507,7 @@ beforeEach(async () => {
   let shuffleCallIndex = 0;
   const createdServer = createDrawingGameServer({
     serveClient: false,
+    reconnectGraceMs: 0,
     gameManagerOptions: {
       introDurationMs: INTRO_DURATION_MS,
       prompts: TEST_PROMPTS,

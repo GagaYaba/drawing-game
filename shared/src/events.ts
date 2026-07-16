@@ -3,6 +3,7 @@ export const SOCKET_EVENTS = {
   SERVER_PONG: "server:pong",
   ROOM_CREATE: "room:create",
   ROOM_JOIN: "room:join",
+  SESSION_RESTORE: "session:restore",
   ROOM_LEAVE: "room:leave",
   ROOM_STATE: "room:state",
   PLAYER_SET_READY: "player:set-ready",

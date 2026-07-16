@@ -1,9 +1,13 @@
-import type { PublicFinishedState } from "@drawing-game/shared";
+import type {
+  PublicFinishedState,
+  PublicPlayer,
+} from "@drawing-game/shared";
 
 import type { PendingRoomAction } from "../hooks/useRoomSession";
 import { GameLeaderboard } from "./game/GameLeaderboard";
 import { GameLeaveAction } from "./game/GameLeaveAction";
 import { GamePhaseLayout } from "./game/GamePhaseLayout";
+import { DisconnectedPlayersNotice } from "./PlayerConnectionStatus";
 
 interface FinishedScreenProps {
   finished: PublicFinishedState | null;
@@ -11,6 +15,8 @@ interface FinishedScreenProps {
   isHost: boolean;
   pendingAction: PendingRoomAction;
   errorMessage: string | null;
+  players?: readonly PublicPlayer[];
+  isConnectionBlocked?: boolean;
   onRequestRematch: () => boolean;
   onLeaveRoom: () => void;
 }
@@ -51,10 +57,12 @@ export function FinishedScreen({
   isHost,
   pendingAction,
   errorMessage,
+  players,
+  isConnectionBlocked = false,
   onRequestRematch,
   onLeaveRoom,
 }: FinishedScreenProps) {
-  const isPending = pendingAction !== null;
+  const isPending = pendingAction !== null || isConnectionBlocked;
   const isRequestingRematch = pendingAction === "rematch";
 
   return (
@@ -133,6 +141,7 @@ export function FinishedScreen({
       </div>
 
       <aside className="game-phase-layout__sidebar finished-sidebar">
+        <DisconnectedPlayersNotice players={players} />
         {finished !== null && (
           <GameLeaderboard
             entries={finished.leaderboard}

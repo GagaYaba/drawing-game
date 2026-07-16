@@ -105,7 +105,7 @@ export interface StartGameInternalResult {
 export interface ContinueGameInternalResult {
   room: PublicRoomState;
   nextTurn?: {
-    drawerSocketId: string;
+    drawerSocketId: string | null;
     secret: TurnSecretPayload;
   };
 }

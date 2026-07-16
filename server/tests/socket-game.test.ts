@@ -6,6 +6,7 @@ import {
   type ActionResult,
   type ClientToServerEvents,
   type GameCancelledPayload,
+  type PlayerSessionCredentials,
   type PublicGameState,
   type PublicRoomState,
   type RoomErrorCode,
@@ -25,7 +26,7 @@ type DrawingGameServer = ReturnType<typeof createDrawingGameServer>;
 
 interface PreparedRoom {
   sockets: TestClient[];
-  sessions: RoomSessionData[];
+  sessions: PlayerSessionCredentials[];
   roomCode: string;
 }
 
@@ -303,7 +304,7 @@ async function prepareRoom(
   const hostSession = expectSuccess(
     await createRoom(sockets[0]!, `${nicknamePrefix}1`),
   );
-  const sessions = [hostSession];
+  const sessions = [hostSession.session];
 
   for (let index = 1; index < sockets.length; index += 1) {
     sessions.push(
@@ -311,9 +312,9 @@ async function prepareRoom(
         await joinRoom(
           sockets[index]!,
           `${nicknamePrefix}${index + 1}`,
-          hostSession.roomCode,
+          hostSession.session.roomCode,
         ),
-      ),
+      ).session,
     );
   }
 
@@ -321,13 +322,18 @@ async function prepareRoom(
     expectSuccess(await setReady(sockets[index]!, true));
   }
 
-  return { sockets, sessions, roomCode: hostSession.roomCode };
+  return {
+    sockets,
+    sessions,
+    roomCode: hostSession.session.roomCode,
+  };
 }
 
 beforeEach(async () => {
   clients = [];
   const createdServer = createDrawingGameServer({
     serveClient: false,
+    reconnectGraceMs: 0,
     gameManagerOptions: {
       introDurationMs: INTRO_DURATION_MS,
       prompts: [TEST_PROMPT],
@@ -643,7 +649,7 @@ describe("Socket.IO game integration", () => {
 
       for (const cancellation of receivedCancellations) {
         expect(cancellation).toMatchObject({
-          reason: "PLAYER_DISCONNECTED",
+          reason: "RECONNECT_TIMEOUT",
         });
         expect(cancellation.message.length).toBeGreaterThan(0);
       }

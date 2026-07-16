@@ -220,7 +220,10 @@ async function delay(milliseconds: number): Promise<void> {
 
 beforeEach(async () => {
   clients = [];
-  const createdServer = createDrawingGameServer({ serveClient: false });
+  const createdServer = createDrawingGameServer({
+    serveClient: false,
+    reconnectGraceMs: 0,
+  });
   server = createdServer;
 
   await new Promise<void>((resolve, reject) => {
@@ -283,14 +286,18 @@ describe("Socket.IO room integration", () => {
       const creation = expectSuccess(await createRoom(host, "Alice"));
       const initialState = await initialStatePromise;
 
-      expect(creation.roomCode).toMatch(/^[A-Z0-9]{5}$/);
-      expect(creation.playerId).toBe(initialState.players[0]?.id);
+      expect(creation.session.roomCode).toMatch(/^[A-Z0-9]{5}$/);
+      expect(creation.session.playerId).toBe(initialState.players[0]?.id);
+      expect(creation.session.token).toEqual(expect.any(String));
       expect(creation.room).toEqual(initialState);
       expect(initialState.players[0]).toMatchObject({
         nickname: "Alice",
         isHost: true,
         isReady: false,
+        isConnected: true,
+        reconnectDeadline: null,
       });
+      expect(JSON.stringify(initialState)).not.toContain(creation.session.token);
 
       const hostUpdatePromise = waitForRoomState(
         host,
@@ -301,15 +308,19 @@ describe("Socket.IO room integration", () => {
         (state) => state.playerCount === 2,
       );
       const join = expectSuccess(
-        await joinRoom(guest, "Bob", creation.roomCode.toLowerCase()),
+        await joinRoom(
+          guest,
+          "Bob",
+          creation.session.roomCode.toLowerCase(),
+        ),
       );
       const [hostState, guestState] = await Promise.all([
         hostUpdatePromise,
         guestUpdatePromise,
       ]);
 
-      expect(join.roomCode).toBe(creation.roomCode);
-      expect(join.playerId).not.toBe(creation.playerId);
+      expect(join.session.roomCode).toBe(creation.session.roomCode);
+      expect(join.session.playerId).not.toBe(creation.session.playerId);
       expect(join.room).toEqual(hostState);
       expect(guestState).toEqual(hostState);
       expect(hostState.players.map((player) => player.nickname)).toEqual([
@@ -318,9 +329,11 @@ describe("Socket.IO room integration", () => {
       ]);
       for (const player of hostState.players) {
         expect(player).not.toHaveProperty("socketId");
+        expect(player).not.toHaveProperty("sessionTokenHash");
       }
+      expect(JSON.stringify(hostState)).not.toContain(join.session.token);
       expect(hostState).toMatchObject({
-        code: creation.roomCode,
+        code: creation.session.roomCode,
         playerCount: 2,
         maxPlayers: 8,
         minimumPlayersToStart: 3,
@@ -341,7 +354,11 @@ describe("Socket.IO room integration", () => {
 
       const creation = expectSuccess(await createRoom(host, "Romane"));
       expectError(
-        await joinRoom(guest, "  romane  ", creation.roomCode),
+        await joinRoom(
+          guest,
+          "  romane  ",
+          creation.session.roomCode,
+        ),
         "NICKNAME_ALREADY_USED",
       );
     },
@@ -389,7 +406,7 @@ describe("Socket.IO room integration", () => {
         "INVALID_READY_STATUS",
       );
 
-      expect(created.roomCode).toMatch(/^[A-HJ-NP-Z2-9]{5}$/);
+      expect(created.session.roomCode).toMatch(/^[A-HJ-NP-Z2-9]{5}$/);
       expect(socket.connected).toBe(true);
     },
     TEST_TIMEOUT_MS,
@@ -405,7 +422,11 @@ describe("Socket.IO room integration", () => {
       const secondRoom = expectSuccess(await createRoom(secondHost, "Bob"));
 
       expectError(
-        await joinRoom(firstHost, "Alice bis", secondRoom.roomCode),
+        await joinRoom(
+          firstHost,
+          "Alice bis",
+          secondRoom.session.roomCode,
+        ),
         "ALREADY_IN_ROOM",
       );
     },
@@ -421,8 +442,12 @@ describe("Socket.IO room integration", () => {
       const sockets = [host, second, third];
 
       const creation = expectSuccess(await createRoom(host, "Alice"));
-      expectSuccess(await joinRoom(second, "Bob", creation.roomCode));
-      expectSuccess(await joinRoom(third, "Chloé", creation.roomCode));
+      expectSuccess(
+        await joinRoom(second, "Bob", creation.session.roomCode),
+      );
+      expectSuccess(
+        await joinRoom(third, "Chloé", creation.session.roomCode),
+      );
 
       for (const [index, socket] of sockets.entries()) {
         const expectedReadyCount = index + 1;
@@ -458,23 +483,27 @@ describe("Socket.IO room integration", () => {
 
       const creation = expectSuccess(await createRoom(host, "Alice"));
       const secondSession = expectSuccess(
-        await joinRoom(second, "Bob", creation.roomCode),
+        await joinRoom(second, "Bob", creation.session.roomCode),
       );
       const thirdSession = expectSuccess(
-        await joinRoom(third, "Chloé", creation.roomCode),
+        await joinRoom(third, "Chloé", creation.session.roomCode),
       );
 
       const secondUpdatePromise = waitForRoomState(
         second,
         (state) =>
           state.playerCount === 2 &&
-          !state.players.some((player) => player.id === creation.playerId),
+          !state.players.some(
+            (player) => player.id === creation.session.playerId,
+          ),
       );
       const thirdUpdatePromise = waitForRoomState(
         third,
         (state) =>
           state.playerCount === 2 &&
-          !state.players.some((player) => player.id === creation.playerId),
+          !state.players.some(
+            (player) => player.id === creation.session.playerId,
+          ),
       );
       host.disconnect();
 
@@ -484,17 +513,19 @@ describe("Socket.IO room integration", () => {
       ]);
       expect(thirdState).toEqual(secondState);
       expect(secondState.players.map((player) => player.id)).toEqual([
-        secondSession.playerId,
-        thirdSession.playerId,
+        secondSession.session.playerId,
+        thirdSession.session.playerId,
       ]);
       expect(secondState.players.filter((player) => player.isHost)).toHaveLength(
         1,
       );
       expect(secondState.players.find((player) => player.isHost)?.id).toBe(
-        secondSession.playerId,
+        secondSession.session.playerId,
       );
       expect(
-        secondState.players.some((player) => player.id === creation.playerId),
+        secondState.players.some(
+          (player) => player.id === creation.session.playerId,
+        ),
       ).toBe(false);
     },
     TEST_TIMEOUT_MS,
@@ -507,7 +538,7 @@ describe("Socket.IO room integration", () => {
       const guest = await connectClient();
       const creation = expectSuccess(await createRoom(host, "Alice"));
       const guestSession = expectSuccess(
-        await joinRoom(guest, "Bob", creation.roomCode),
+        await joinRoom(guest, "Bob", creation.session.roomCode),
       );
       const guestUpdatePromise = waitForRoomState(
         guest,
@@ -519,7 +550,7 @@ describe("Socket.IO room integration", () => {
 
       expect(guestState.players).toEqual([
         expect.objectContaining({
-          id: guestSession.playerId,
+          id: guestSession.session.playerId,
           nickname: "Bob",
           isHost: true,
         }),
@@ -562,7 +593,7 @@ describe("Socket.IO room integration", () => {
         (state) => state.playerCount === 2,
       );
       expectSuccess(
-        await joinRoom(firstGuest, "Bob", firstRoom.roomCode),
+        await joinRoom(firstGuest, "Bob", firstRoom.session.roomCode),
       );
       const [hostState, guestState] = await Promise.all([
         firstHostUpdate,
@@ -572,16 +603,18 @@ describe("Socket.IO room integration", () => {
 
       secondHost.off(SOCKET_EVENTS.ROOM_STATE, captureUnrelatedUpdate);
       expect(guestState).toEqual(hostState);
-      expect(hostState.code).toBe(firstRoom.roomCode);
+      expect(hostState.code).toBe(firstRoom.session.roomCode);
       expect(hostState.players.map((player) => player.nickname)).toEqual([
         "Alice",
         "Bob",
       ]);
-      expect(secondRoom.room.code).toBe(secondRoom.roomCode);
+      expect(secondRoom.room.code).toBe(secondRoom.session.roomCode);
       expect(secondRoom.room.players.map((player) => player.nickname)).toEqual([
         "Chloé",
       ]);
-      expect(secondRoom.roomCode).not.toBe(firstRoom.roomCode);
+      expect(secondRoom.session.roomCode).not.toBe(
+        firstRoom.session.roomCode,
+      );
       expect(unrelatedUpdates).toEqual([]);
     },
     TEST_TIMEOUT_MS,

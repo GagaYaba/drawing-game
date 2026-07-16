@@ -1,4 +1,8 @@
-import type { GuessValue, PublicGameState } from "@drawing-game/shared";
+import type {
+  GuessValue,
+  PublicGameState,
+  PublicPlayer,
+} from "@drawing-game/shared";
 
 import type {
   ClientGuessState,
@@ -12,6 +16,7 @@ import {
   GamePromptValue,
 } from "./game/GamePromptHeader";
 import { GameStatusPanel } from "./game/GameStatusPanel";
+import { DisconnectedPlayersNotice } from "./PlayerConnectionStatus";
 import { GuessScale } from "./scale/GuessScale.js";
 import { ScaleGauge } from "./scale/ScaleGauge";
 
@@ -22,6 +27,8 @@ interface VotingScreenProps {
   guessState: ClientGuessState;
   pendingAction: PendingRoomAction;
   errorMessage: string | null;
+  players?: readonly PublicPlayer[];
+  isConnectionBlocked?: boolean;
   onSelectGuess: (value: GuessValue) => void;
   onSubmitGuess: () => boolean;
   onLeaveRoom: () => void;
@@ -41,12 +48,15 @@ export function VotingScreen({
   guessState,
   pendingAction,
   errorMessage,
+  players,
+  isConnectionBlocked = false,
   onSelectGuess,
   onSubmitGuess,
   onLeaveRoom,
 }: VotingScreenProps) {
   const isDrawer = currentPlayerId === game.currentDrawer.id;
-  const isPending = pendingAction !== null || guessState.isSubmitting;
+  const isPending =
+    pendingAction !== null || guessState.isSubmitting || isConnectionBlocked;
   const voting = game.voting;
   const voteProgress =
     voting === null
@@ -147,6 +157,7 @@ export function VotingScreen({
 
       <aside className="game-phase-layout__sidebar voting-sidebar">
         <GameStatusPanel game={game} />
+        <DisconnectedPlayersNotice players={players} />
 
         {errorMessage !== null && (
           <p

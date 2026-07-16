@@ -7,6 +7,7 @@ import {
   type ContinueGameSuccessData,
   type PublicRoomState,
   type RequestRematchSuccessData,
+  type RestoreSessionSuccessData,
   type RoomSessionData,
   type ServerToClientEvents,
   type StartGameSuccessData,
@@ -17,6 +18,9 @@ import type { Server } from "socket.io";
 
 import { GameManager } from "../game/game-manager.js";
 import { RoomManager, RoomManagerError } from "../rooms/room-manager.js";
+import type { ReconnectManager } from "../sessions/reconnect-manager.js";
+import type { SessionRestorationManager } from "../sessions/session-restoration.js";
+import { validateRestoreSessionPayload } from "../sessions/session-validation.js";
 import {
   validateCreateRoomPayload,
   validateJoinRoomPayload,
@@ -88,6 +92,8 @@ export function registerSocketHandlers(
   io: DrawingGameIo,
   roomManager: RoomManager,
   gameManager: GameManager,
+  reconnectManager: ReconnectManager,
+  sessionRestorationManager: SessionRestorationManager,
 ) {
   io.on("connection", (socket) => {
     console.info(`[socket] Client connected: ${socket.id}`);
@@ -124,15 +130,21 @@ export function registerSocketHandlers(
       }
 
       try {
-        await socket.join(session.roomCode);
+        await socket.join(session.session.roomCode);
       } catch (error) {
-        roomManager.handleSocketDisconnect(socket.id);
+        sessionRestorationManager.rollbackRoomAdmission(
+          session.session.roomCode,
+          session.session.playerId,
+        );
         request.acknowledge(actionFailure(error));
         return;
       }
 
       request.acknowledge({ success: true, data: session });
-      io.to(session.roomCode).emit(SOCKET_EVENTS.ROOM_STATE, session.room);
+      io.to(session.session.roomCode).emit(
+        SOCKET_EVENTS.ROOM_STATE,
+        session.room,
+      );
     });
 
     socket.on(SOCKET_EVENTS.ROOM_JOIN, async (...argumentsReceived: unknown[]) => {
@@ -160,16 +172,78 @@ export function registerSocketHandlers(
       }
 
       try {
-        await socket.join(session.roomCode);
+        await socket.join(session.session.roomCode);
       } catch (error) {
-        roomManager.handleSocketDisconnect(socket.id);
+        sessionRestorationManager.rollbackRoomAdmission(
+          session.session.roomCode,
+          session.session.playerId,
+        );
         request.acknowledge(actionFailure(error));
         return;
       }
 
       request.acknowledge({ success: true, data: session });
-      io.to(session.roomCode).emit(SOCKET_EVENTS.ROOM_STATE, session.room);
+      io.to(session.session.roomCode).emit(
+        SOCKET_EVENTS.ROOM_STATE,
+        session.room,
+      );
     });
+
+    socket.on(
+      SOCKET_EVENTS.SESSION_RESTORE,
+      async (...argumentsReceived: unknown[]) => {
+        const request = getActionRequest<RestoreSessionSuccessData>(
+          argumentsReceived,
+        );
+        if (request === null) {
+          return;
+        }
+
+        const validation = validateRestoreSessionPayload(request.payload);
+        if (!validation.success) {
+          request.acknowledge(validation);
+          return;
+        }
+
+        let roomCode: string;
+        try {
+          roomCode = sessionRestorationManager.prepareSessionRestore(
+            socket.id,
+            validation.data,
+          ).roomCode;
+        } catch (error) {
+          request.acknowledge(actionFailure(error));
+          return;
+        }
+
+        try {
+          await socket.join(roomCode);
+        } catch (error) {
+          request.acknowledge(actionFailure(error));
+          return;
+        }
+
+        if (!socket.connected) {
+          await socket.leave(roomCode);
+          return;
+        }
+
+        let restored: RestoreSessionSuccessData;
+        try {
+          restored = sessionRestorationManager.restoreSession(
+            socket.id,
+            validation.data,
+          );
+        } catch (error) {
+          await socket.leave(roomCode);
+          request.acknowledge(actionFailure(error));
+          return;
+        }
+
+        request.acknowledge({ success: true, data: restored });
+        io.to(roomCode).emit(SOCKET_EVENTS.ROOM_STATE, restored.room);
+      },
+    );
 
     socket.on(SOCKET_EVENTS.ROOM_LEAVE, async (...argumentsReceived: unknown[]) => {
       const request = getActionRequest<null>(argumentsReceived);
@@ -184,6 +258,10 @@ export function registerSocketHandlers(
             ? false
             : gameManager.cancelGame(currentRoom.code);
         const departure = roomManager.leaveRoom(socket.id);
+        reconnectManager.clearPlayerReconnectTimer(
+          departure.roomCode,
+          departure.playerId,
+        );
         await socket.leave(departure.roomCode);
         request.acknowledge({ success: true, data: null });
 
@@ -296,7 +374,10 @@ export function registerSocketHandlers(
             continuation.room,
           );
 
-          if (continuation.nextTurn !== undefined) {
+          if (
+            continuation.nextTurn !== undefined &&
+            continuation.nextTurn.drawerSocketId !== null
+          ) {
             io.to(continuation.nextTurn.drawerSocketId).emit(
               SOCKET_EVENTS.TURN_SECRET,
               continuation.nextTurn.secret,
@@ -407,24 +488,13 @@ export function registerSocketHandlers(
     );
 
     socket.on("disconnect", (reason) => {
-      const currentRoom = roomManager.getPlayerRoomBySocketId(socket.id);
-      const gameWasCancelled =
-        currentRoom === undefined
-          ? false
-          : gameManager.cancelGame(currentRoom.code);
-      const departure = roomManager.handleSocketDisconnect(socket.id);
+      const disconnection =
+        reconnectManager.markPlayerDisconnected(socket.id);
 
-      if (departure !== null && departure.room !== null) {
-        if (gameWasCancelled) {
-          io.to(departure.roomCode).emit(SOCKET_EVENTS.GAME_CANCELLED, {
-            reason: "PLAYER_DISCONNECTED",
-            message:
-              "La partie a été annulée car un joueur s’est déconnecté.",
-          });
-        }
-        io.to(departure.roomCode).emit(
+      if (disconnection !== null) {
+        io.to(disconnection.roomCode).emit(
           SOCKET_EVENTS.ROOM_STATE,
-          departure.room,
+          disconnection.room,
         );
       }
 

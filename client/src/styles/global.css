@@ -421,6 +421,11 @@ summary:focus-visible {
   background: #fff;
 }
 
+.player-row--disconnected {
+  border-color: #fcd34d;
+  background: #fffbeb;
+}
+
 .player-avatar {
   display: grid;
   width: 2.45rem;
@@ -480,6 +485,23 @@ summary:focus-visible {
 
 .ready-status--yes {
   color: #047857;
+}
+
+.player-connection-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.35rem;
+  color: #047857;
+  font-size: 0.76rem;
+  font-weight: 800;
+  line-height: 1.3;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.player-connection-status--reconnecting {
+  color: #92400e;
 }
 
 .readiness-card {
@@ -1457,6 +1479,12 @@ footer {
     justify-self: start;
   }
 
+  .player-row > .player-connection-status {
+    grid-column: 2;
+    justify-self: start;
+    text-align: left;
+  }
+
   .game-actions {
     align-items: stretch;
     flex-direction: column;
@@ -1535,6 +1563,7 @@ footer {
     grid-column: 1 / -1;
     width: fit-content;
   }
+
 }
 
 /* Full-screen game shell -------------------------------------------------- */
@@ -1731,6 +1760,49 @@ footer {
   margin: 0;
   padding: 0.6rem 0.7rem;
   font-size: 0.76rem;
+}
+
+.disconnected-players-notice {
+  min-width: 0;
+  padding: 0.65rem 0.7rem;
+  border: 1px solid #fcd34d;
+  border-radius: 0.7rem;
+  color: #78350f;
+  background: #fffbeb;
+}
+
+.disconnected-players-notice .card-label {
+  margin-bottom: 0.35rem;
+  color: #92400e;
+}
+
+.disconnected-players-notice ul {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  gap: 0.3rem;
+  list-style: none;
+}
+
+.disconnected-players-notice li {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.55rem;
+  font-size: 0.74rem;
+}
+
+.disconnected-players-notice li strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.disconnected-players-notice .player-connection-status {
+  flex: 0 0 auto;
+  font-size: 0.7rem;
 }
 
 .game-sidebar-countdown {
@@ -2305,6 +2377,91 @@ footer {
 .finished-rematch-button {
   width: 100%;
   min-height: 2.75rem;
+}
+
+.connection-recovery-overlay {
+  position: fixed;
+  z-index: 1000;
+  inset: 0;
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  padding: clamp(0.75rem, 4vw, 2rem);
+  place-items: center;
+  background: rgba(15, 23, 42, 0.5);
+  backdrop-filter: blur(5px);
+}
+
+.connection-recovery-card {
+  display: grid;
+  width: min(100%, 30rem);
+  max-height: calc(100vh - 1.5rem);
+  padding: clamp(1rem, 5vw, 1.5rem);
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.9rem;
+  overflow-y: auto;
+  border: 1px solid rgba(199, 210, 254, 0.9);
+  border-radius: 1rem;
+  color: #1e293b;
+  background: #fff;
+  box-shadow: 0 1.5rem 4rem rgba(15, 23, 42, 0.28);
+}
+
+.connection-recovery-card h2 {
+  margin-bottom: 0.45rem;
+  color: #111827;
+  font-size: clamp(1.15rem, 5vw, 1.5rem);
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.connection-recovery-card p {
+  margin-bottom: 0.45rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.connection-recovery-card .card-label {
+  color: #4f46e5;
+}
+
+.connection-recovery-icon {
+  display: grid;
+  width: 2.5rem;
+  height: 2.5rem;
+  place-items: center;
+  border-radius: 0.75rem;
+  color: #3730a3;
+  background: #e0e7ff;
+  font-size: 1.3rem;
+  font-weight: 900;
+}
+
+.connection-recovery-hint {
+  color: #64748b;
+  font-size: 0.82rem;
+}
+
+.connection-recovery-retry {
+  width: 100%;
+  margin-top: 0.45rem;
+}
+
+@supports (max-height: 100dvh) {
+  .connection-recovery-card {
+    max-height: calc(100dvh - 1.5rem);
+  }
+}
+
+@media (max-width: 520px) {
+  .connection-recovery-card {
+    grid-template-columns: 1fr;
+  }
+
+  .connection-recovery-icon {
+    width: 2.25rem;
+    height: 2.25rem;
+  }
 }
 
 @media (min-width: 900px) {

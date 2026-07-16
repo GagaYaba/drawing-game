@@ -20,10 +20,16 @@ Application multijoueur de dessin en temps réel. Les joueurs créent ou rejoign
 - continuation réservée à l'hôte après chaque révélation, jusqu'à l'écran `FINISHED` qui annonce tous les gagnants ex æquo ;
 - identifiant `gameId` unique généré par le serveur pour chaque partie lancée dans un salon ;
 - revanche autoritaire proposée uniquement par l'hôte depuis `FINISHED`, avec retour de tout le groupe au lobby, scores remis à zéro et nouveaux statuts prêts requis ;
+- jeton de session privé de 256 bits généré à la création ou à la connexion, dont seul le hash SHA-256 est conservé côté serveur ;
+- restauration automatique du même joueur et du même salon après actualisation, fermeture d'onglet ou courte coupure réseau ;
+- délai de grâce de reconnexion de 60 secondes par défaut, avec présence `Reconnexion…` visible par les autres joueurs ;
+- restauration privée du niveau secret du dessinateur et de sa propre estimation déjà validée, sans exposer les données d'un autre joueur ;
+- conservation locale du brouillon vectoriel du dessinateur et de la sélection de vote non envoyée, protégées par `roomCode`, `gameId`, `turnId` et `playerId` ;
 - fermeture du salon aux nouveaux joueurs dès le lancement ;
-- annulation de la partie et retour au lobby si un joueur quitte ou se déconnecte pendant une phase active ;
-- conservation du résultat historique si un joueur quitte pendant `FINISHED`, avec transfert de l'hôte permettant au groupe restant de proposer une revanche ;
-- départ volontaire ou retrait automatique à la déconnexion, avec transfert du rôle d'hôte au joueur présent depuis le plus longtemps ;
+- annulation immédiate de la partie si un joueur la quitte volontairement pendant une phase active ;
+- annulation et retour au lobby uniquement à l'expiration du délai de reconnexion d'un joueur pendant une phase active ;
+- conservation du résultat historique si un joueur quitte ou expire pendant `FINISHED`, avec transfert de l'hôte permettant au groupe restant de proposer une revanche ;
+- départ volontaire immédiat, invalidation de la session et transfert du rôle d'hôte au joueur présent depuis le plus longtemps ;
 - suppression automatique d'un salon devenu vide ;
 - messages d'erreur pour les codes invalides, salons inexistants ou pleins et pseudonymes invalides ou déjà utilisés ;
 - outils de diagnostic pour l'API et la connexion Socket.IO.
@@ -68,7 +74,7 @@ Installez les dépendances de la racine et des trois workspaces :
 npm install
 ```
 
-Le serveur utilise le port défini par la variable d'environnement `PORT`, avec `3000` comme valeur par défaut. Les valeurs attendues sont documentées dans `.env.example` ; aucun secret n'est nécessaire à ce stade.
+Le serveur utilise le port défini par la variable d'environnement `PORT`, avec `3000` comme valeur par défaut. `PLAYER_RECONNECT_GRACE_MS` configure le délai de grâce de reconnexion en millisecondes et vaut `60000` par défaut ; les valeurs acceptées vont de `0` à `2147483647`, limite sûre des timers Node.js. Les valeurs attendues sont documentées dans `.env.example` ; aucun secret statique n'est nécessaire.
 
 ## Développement
 
@@ -106,7 +112,7 @@ Le serveur autorise le lancement uniquement lorsque toutes les conditions suivan
 - tous les joueurs sont prêts ;
 - la demande provient de l'hôte.
 
-Le bouton **Lancer la partie** n'est affiché qu'à l'hôte et reste désactivé tant que `canStart` vaut `false`. Les autres joueurs voient un message leur indiquant que l'hôte lancera la partie. Avant le lancement, si l'hôte quitte le salon ou se déconnecte, son rôle est transféré au joueur restant présent depuis le plus longtemps.
+Le bouton **Lancer la partie** n'est affiché qu'à l'hôte et reste désactivé tant que `canStart` vaut `false`. Les autres joueurs voient un message leur indiquant que l'hôte lancera la partie. Une déconnexion temporaire conserve le rôle de l'hôte et bloque le lancement tant que le groupe n'est pas de nouveau connecté. Si l'hôte quitte volontairement ou ne revient pas avant l'expiration de son délai, son rôle est transféré au joueur restant présent depuis le plus longtemps.
 
 Une fois la partie lancée, le salon est fermé : toute nouvelle tentative de connexion avec son code est refusée. Les statuts prêt et un second lancement ne peuvent plus modifier la partie en cours.
 
@@ -132,6 +138,7 @@ La revanche ne démarre pas automatiquement une nouvelle partie et ne fait l'obj
 Une demande acceptée :
 
 - conserve le code du salon, les joueurs encore présents, leurs identifiants publics, leur ordre d'arrivée et l'hôte courant ;
+- conserve les mêmes jetons privés de session pour les joueurs toujours présents ;
 - supprime entièrement l'état de la partie terminée ;
 - remet chaque score à `0` et chaque statut `isReady` à `false` ;
 - efface les dessins, estimations, secrets, résultats, classements temporaires, identifiants de tour et consignes utilisées avec l'ancien état de partie ;
@@ -266,15 +273,57 @@ La soumission utilise l'événement `drawing:submit` avec le payload `{ drawing 
 11. Remettez les trois joueurs prêts et relancez. Vérifiez que le nouveau `gameId` et le nouveau `turnId` diffèrent de ceux de la partie terminée, que l'ordre a été mélangé à nouveau et qu'aucun dessin, secret, vote ou classement précédent n'est visible.
 12. Contrôlez aussi le refus d'un non-hôte, le transfert de l'hôte après son départ depuis `FINISHED`, `/api/health`, le bouton de ping Socket.IO, le responsive à 320 px et le lancement de production décrits plus bas.
 
+### Essai manuel de la restauration de session
+
+Utilisez au moins trois navigateurs, profils ou contextes isolés. Pour accélérer le scénario d'expiration, vous pouvez lancer temporairement le serveur avec une petite valeur de `PLAYER_RECONNECT_GRACE_MS`.
+
+1. Actualisez successivement un joueur dans le lobby, `ROUND_INTRO`, `DRAWING`, `VOTING` avant et après validation, `REVEAL` puis `FINISHED`. Vérifiez que le même joueur, le même rôle, le même score, le même `gameId` et le même `turnId` reviennent.
+2. Pendant `DRAWING`, tracez plusieurs traits, changez d'outil, actualisez le dessinateur puis vérifiez le retour du dessin local et du niveau secret avant de soumettre.
+3. Pendant `VOTING`, actualisez une sélection non envoyée puis une estimation déjà validée. La première doit rester modifiable ; la seconde doit revenir verrouillée et un second envoi doit être refusé.
+4. Coupez brièvement le réseau d'un client. Son écran doit rester visible sous la superposition `Connexion interrompue`, et les autres joueurs doivent voir son statut `Reconnexion…`. Rétablissez le réseau et vérifiez la disparition des deux états.
+5. Laissez expirer un joueur pendant une phase active. Les autres doivent recevoir `RECONNECT_TIMEOUT` et revenir au lobby avec scores et statuts prêts remis à zéro. Vérifiez qu'une restauration ultérieure est refusée.
+6. Cliquez sur **Quitter la partie** et vérifiez le retrait immédiat, le nettoyage du stockage local et l'impossibilité de restaurer cette session.
+7. Ouvrez la même origine dans un second onglet pendant que le premier reste actif. Le second doit afficher `Cette session est déjà ouverte dans un autre onglet` sans prendre le contrôle.
+8. Après une restauration dans `FINISHED`, proposez une revanche puis relancez la partie. Les credentials doivent rester valides tandis que les anciens brouillons, secrets et votes doivent être absents.
+9. Contrôlez la superposition aux largeurs 320, 375 et 390 px, puis aux résolutions 1366 × 768, 1440 × 900, 1536 × 864 et 1920 × 1080, sans débordement ni perte du contenu sous-jacent.
+
 ## Stockage et durée de vie des salons
 
 Les salons, les joueurs et l'état de partie sont stockés **uniquement dans la mémoire du serveur**. Ils disparaissent donc lorsque le serveur redémarre, et un salon est supprimé dès que son dernier joueur le quitte.
 
-La session du navigateur n'est pas persistée. Une actualisation de page ou une déconnexion Socket.IO retire immédiatement le joueur du salon et lui fait perdre sa session locale ; aucune reconnexion automatique n'est mise en place.
+À la création ou à la connexion, le serveur génère un jeton aléatoire avec `crypto.randomBytes(32).toString("base64url")`. Le jeton brut est renvoyé uniquement dans l'acknowledgement privé du joueur et enregistré dans `localStorage` sous la clé `drawing-scale-game-session`. Le serveur ne conserve que son hash SHA-256 dans le joueur interne et utilise une comparaison sûre lors de `session:restore`. Le jeton, son hash, `socketId` et `disconnectedAt` ne font jamais partie de `PublicPlayer`, de `PublicRoomState`, des logs ou du DOM.
 
-Dans le lobby, le joueur doit rejoindre manuellement le salon s'il existe encore et le rôle d'hôte est transféré si nécessaire. Pendant `ROUND_INTRO`, `DRAWING`, `VOTING` ou `REVEAL`, le départ volontaire, la déconnexion ou l'actualisation de n'importe quel joueur annule la partie pour tout le groupe. Les joueurs restants reviennent au lobby avec un message explicatif, des scores remis à zéro et un statut non prêt. Le dessin, les estimations, les secrets et la progression de la partie annulée disparaissent avec l'état de partie.
+Lors d'une déconnexion involontaire, le joueur reste dans le salon avec `isConnected: false` et un `reconnectDeadline`. Le délai par défaut est de 60 secondes et peut être configuré avec `PLAYER_RECONNECT_GRACE_MS`. La phase en cours n'est pas mise en pause : `ROUND_INTRO` peut continuer vers `DRAWING`, tandis que le jeu attend naturellement un dessinateur, un votant ou un hôte absent. Les autres clients affichent textuellement `Reconnexion…`.
 
-`FINISHED` constitue l'unique exception. Un départ retire seulement le joueur de `room.players` : les autres restent sur l'écran final, leurs scores ne sont pas modifiés et `PublicFinishedState.leaderboard` demeure la photographie historique calculée au moment de la fin. Un joueur parti, y compris un gagnant, peut donc rester visible dans ce classement. Si l'hôte part, le joueur restant au `joinedAt` le plus ancien devient l'unique nouvel hôte et peut proposer la revanche. Si le dernier joueur part, le salon et tout timer résiduel sont supprimés.
+Au prochain événement Socket.IO `connect`, le client relit ses credentials et envoie :
+
+```ts
+session:restore
+{
+  roomCode: string;
+  playerId: string;
+  token: string;
+}
+```
+
+Une restauration valide annule le timer, rattache le nouveau `socket.id` au même joueur, rejoint de nouveau la room Socket.IO et conserve le rôle d'hôte, le score, l'ordre de passage et l'état de partie. L'acknowledgement privé contient l'état public courant ainsi que, pour le seul joueur restauré :
+
+- les `gameId` et `turnId` courants ;
+- le niveau secret uniquement s'il est le dessinateur du tour ;
+- sa propre estimation déjà validée et son horodatage ;
+- l'indication qu'il est ou non le dessinateur courant.
+
+Une session déjà active sur un autre socket est refusée avec `SESSION_ALREADY_ACTIVE`. Le client effectue une seule nouvelle tentative très courte pour absorber la course d'une actualisation, puis affiche un message explicite. Deux onglets actifs simultanément avec la même session ne sont pas pris en charge et le premier onglet reste propriétaire.
+
+Le brouillon de dessin est stocké séparément sous `drawing-scale-game-draft` après la fin d'un trait ou une modification d'outil. Il contient le document vectoriel, l'outil, la couleur, l'épaisseur et les identifiants du salon, de la partie, du tour et du joueur. Il n'est restauré que pour le dessinateur courant, pendant le même tour `DRAWING`, avant toute soumission officielle. Une sélection de vote non envoyée utilise `drawing-scale-game-guess-draft` avec les mêmes protections d'identifiants. Une estimation déjà validée reste, elle, autoritaire côté serveur et revient verrouillée dans l'état privé restauré.
+
+Les brouillons sont supprimés à la soumission, au changement de phase, de tour ou de partie, à la revanche, à l'annulation, au départ, à l'expiration ou dès qu'un identifiant ne correspond plus. Aucun dessin non soumis n'est stocké sur le serveur ni synchronisé entre appareils.
+
+Si le délai expire dans le lobby, le joueur est retiré, le rôle d'hôte est transféré si nécessaire et le salon vide est supprimé. Pendant `ROUND_INTRO`, `DRAWING`, `VOTING` ou `REVEAL`, l'expiration applique le comportement historique : retrait, annulation avec `RECONNECT_TIMEOUT`, retour au lobby, scores à zéro et statuts non prêts. Pendant `FINISHED`, le joueur est retiré mais le classement historique reste inchangé.
+
+Le départ volontaire `room:leave` demeure immédiat : il invalide la session, nettoie son timer et ses données locales, puis applique sans délai les règles de départ de la phase courante. Il ne déclenche jamais de période de grâce.
+
+`localStorage` est une limite de sécurité assumée de cette V0 sans authentification : un script exécuté dans la même origine pourrait lire le jeton. La restauration ne survit pas à un redémarrage du serveur, ne fonctionne pas entre appareils et ne constitue pas un système de compte utilisateur.
 
 ## Vérification des types
 
@@ -294,7 +343,7 @@ npm test
 
 Cette commande lance les tests Vitest : tests unitaires de la logique des salons, de la partie, du score, des estimations, du document vectoriel et de sa géométrie, ainsi que des tests d'intégration avec un serveur sur un port éphémère et de vrais clients Socket.IO.
 
-La suite actuelle contient **311 tests**. Elle couvre notamment :
+La suite actuelle contient **360 tests**. Elle couvre notamment :
 
 - les validations strictes des salons, dessins, votes, `game:start`, `game:continue` et `game:request-rematch`, ainsi que les autorisations de l'hôte et du dessinateur ;
 - la table de points des votants, le plafond de 5 points du dessinateur et l'application atomique et unique des scores ;
@@ -302,6 +351,10 @@ La suite actuelle contient **311 tests**. Elle couvre notamment :
 - la rotation fixe de tous les joueurs pendant deux manches, la continuité des numéros de tour et la transition finale vers `FINISHED` ;
 - l'utilisation unique des consignes pendant une partie ;
 - l'unicité des `gameId` et `turnId`, la remise à zéro des états privés et locaux et le filtrage des événements `turn:secret` retardés ;
+- la génération, le hash et la vérification des jetons privés, ainsi que leur absence de l'état public ;
+- la grâce de reconnexion, la restauration du même joueur dans chaque phase, l'expiration et le refus multi-onglets ;
+- la restauration privée du secret du dessinateur et du vote validé, sans fuite vers les autres joueurs ;
+- la validation et le nettoyage des credentials, brouillons de dessin et sélections de vote conservés dans le navigateur ;
 - la confidentialité pendant `DRAWING` et `VOTING`, l'isolation entre salons et les événements Socket.IO ;
 - l'annulation et le retour au lobby après un départ pendant une phase active, ainsi que la conservation historique et le transfert d'hôte pendant `FINISHED` ;
 - la revanche complète dans le même salon, le reset des scores et statuts prêts, la nouvelle partie indépendante et l'isolation entre salons ;
@@ -352,19 +405,21 @@ En développement, le même endpoint est également disponible via le proxy du f
 
 Le bouton envoie l'événement `client:ping`. Le serveur répond uniquement au client concerné avec `server:pong` ; les noms d'événements et leurs payloads sont déclarés dans le workspace `shared`.
 
-Les actions utilisent également des événements typés : `room:create`, `room:join`, `room:leave`, `player:set-ready`, `game:start`, `game:continue`, `game:request-rematch`, `drawing:submit` et `guess:submit`. Le serveur diffuse ensuite l'état public à jour avec `room:state`.
+Les actions utilisent également des événements typés : `room:create`, `room:join`, `session:restore`, `room:leave`, `player:set-ready`, `game:start`, `game:continue`, `game:request-rematch`, `drawing:submit` et `guess:submit`. Le serveur diffuse ensuite l'état public à jour avec `room:state`.
 
 - pendant `VOTING`, cet état expose uniquement les compteurs du vote ;
 - pendant `REVEAL`, il expose le secret, les résultats détaillés, les scores, le classement et le prochain dessinateur ;
 - pendant `FINISHED`, il expose le classement final, les gagnants et le nombre de manches et de tours terminés.
 
-À chaque nouveau tour, `turn:secret` transmet uniquement au dessinateur les champs `roomCode`, `gameId`, `turnId`, `drawerPlayerId` et `secretLevel`. Après `game:continue`, le nouvel état public est diffusé à toute la room, puis ce secret est adressé au seul socket concerné. Aucun nouveau secret n'est envoyé lors du passage à `FINISHED`. `game:request-rematch` ne reçoit aucun payload métier et répond par un acknowledgement typé contenant le nouvel état public du lobby. `game:cancelled` informe les joueurs restants qu'un départ pendant une phase active a interrompu et réinitialisé la partie.
+À chaque nouveau tour, `turn:secret` transmet uniquement au dessinateur les champs `roomCode`, `gameId`, `turnId`, `drawerPlayerId` et `secretLevel`. Après `game:continue`, le nouvel état public est diffusé à toute la room, puis ce secret est adressé au seul socket concerné s'il est connecté ; sinon il le récupère dans l'état privé de `session:restore`. Aucun nouveau secret n'est envoyé lors du passage à `FINISHED`. `game:request-rematch` ne reçoit aucun payload métier et répond par un acknowledgement typé contenant le nouvel état public du lobby. `game:cancelled` informe les joueurs restants qu'un départ volontaire ou l'expiration d'une reconnexion pendant une phase active a interrompu et réinitialisé la partie.
 
 ## Limites de cette version
 
 Cette version ne comprend pas encore :
 
-- la reconnexion ou la restauration d'une session après actualisation ;
 - l'authentification et les comptes utilisateurs ;
 - une base de données ou toute autre persistance des salons ;
+- la restauration après redémarrage du serveur ;
+- la synchronisation d'une session ou d'un brouillon entre plusieurs appareils ;
+- l'utilisation simultanée d'une même session dans plusieurs onglets ;
 - un vote collectif de revanche, un historique des parties ou une conservation des scores entre deux parties.

@@ -54,8 +54,12 @@ function createPlayers(
     nickname: `J${index + 1}`,
     isHost: index === 0,
     isReady: true,
+    isConnected: true,
     joinedAt: 1_000 + index,
     score,
+    sessionTokenHash: `session-token-hash-${index + 1}`,
+    disconnectedAt: null,
+    reconnectDeadline: null,
   }));
 }
 

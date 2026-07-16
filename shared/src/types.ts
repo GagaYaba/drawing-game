@@ -15,6 +15,8 @@ export interface PublicPlayer {
   nickname: string;
   isHost: boolean;
   isReady: boolean;
+  isConnected: boolean;
+  reconnectDeadline: number | null;
   score: number;
 }
 
@@ -137,6 +139,12 @@ export interface JoinRoomPayload {
   roomCode: string;
 }
 
+export interface RestoreSessionPayload {
+  roomCode: string;
+  playerId: string;
+  token: string;
+}
+
 export interface SetPlayerReadyPayload {
   isReady: boolean;
 }
@@ -180,16 +188,21 @@ export type RematchErrorCode =
   | "GAME_NOT_FINISHED"
   | "NOT_HOST";
 
+export type SessionErrorCode =
+  | "INVALID_SESSION"
+  | "SESSION_EXPIRED"
+  | "ROOM_NOT_FOUND"
+  | "PLAYER_NOT_FOUND"
+  | "SESSION_ALREADY_ACTIVE";
+
 export type RoomErrorCode =
   | "INVALID_NICKNAME"
   | "INVALID_ROOM_CODE"
   | "INVALID_READY_STATUS"
-  | "ROOM_NOT_FOUND"
   | "ROOM_FULL"
   | "NICKNAME_ALREADY_USED"
   | "ALREADY_IN_ROOM"
   | "NOT_IN_ROOM"
-  | "PLAYER_NOT_FOUND"
   | "INVALID_GAME_START_REQUEST"
   | "INVALID_GAME_CONTINUE_REQUEST"
   | "INVALID_GAME_REMATCH_REQUEST"
@@ -208,6 +221,7 @@ export type RoomErrorCode =
   | "DRAWING_TOO_LARGE"
   | "DRAWING_ALREADY_SUBMITTED"
   | GuessErrorCode
+  | SessionErrorCode
   | "INTERNAL_ERROR";
 
 export type ActionResult<T> =
@@ -223,10 +237,27 @@ export type ActionResult<T> =
       };
     };
 
-export interface RoomSessionData {
+export interface PlayerSessionCredentials {
   roomCode: string;
   playerId: string;
+  token: string;
+}
+
+export interface RoomSessionData {
   room: PublicRoomState;
+  session: PlayerSessionCredentials;
+}
+
+export interface RestoredPrivatePlayerState {
+  gameId: string | null;
+  turnId: string | null;
+  secretLevel: GuessValue | null;
+  submittedGuess: SubmitGuessSuccessData | null;
+  isCurrentDrawer: boolean;
+}
+
+export interface RestoreSessionSuccessData extends RoomSessionData {
+  privateState: RestoredPrivatePlayerState;
 }
 
 export interface StartGameSuccessData {
@@ -251,7 +282,8 @@ export interface TurnSecretPayload {
 
 export type GameCancellationReason =
   | "PLAYER_LEFT"
-  | "PLAYER_DISCONNECTED";
+  | "PLAYER_DISCONNECTED"
+  | "RECONNECT_TIMEOUT";
 
 export interface GameCancelledPayload {
   reason: GameCancellationReason;
@@ -269,6 +301,10 @@ export interface ClientToServerEvents {
   [SOCKET_EVENTS.ROOM_JOIN]: (
     payload: JoinRoomPayload,
     acknowledge: ActionAcknowledgement<RoomSessionData>,
+  ) => void;
+  [SOCKET_EVENTS.SESSION_RESTORE]: (
+    payload: RestoreSessionPayload,
+    acknowledge: ActionAcknowledgement<RestoreSessionSuccessData>,
   ) => void;
   [SOCKET_EVENTS.ROOM_LEAVE]: (
     acknowledge: ActionAcknowledgement<null>,

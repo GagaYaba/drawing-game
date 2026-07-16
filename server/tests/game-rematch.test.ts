@@ -25,6 +25,15 @@ import {
 
 const ROOM_CODE = "7KXMP";
 const PLAYER_COUNT = 3;
+
+function requireSocketId(player: { socketId: string | null }): string {
+  if (player.socketId === null) {
+    throw new Error("Le joueur de test devrait être connecté.");
+  }
+
+  return player.socketId;
+}
+
 const TEST_PROMPTS: DrawingPrompt[] = Array.from(
   { length: PLAYER_COUNT * 2 },
   (_value, index) => ({
@@ -91,15 +100,15 @@ function createHarness(
     (_value, index) => `socket-${index + 1}`,
   );
   const host = roomManager.createRoom(socketIds[0]!, "J1");
-  const playerIds = [host.playerId];
+  const playerIds = [host.session.playerId];
 
   for (let index = 1; index < PLAYER_COUNT; index += 1) {
     playerIds.push(
       roomManager.joinRoom(
         socketIds[index]!,
         `J${index + 1}`,
-        host.roomCode,
-      ).playerId,
+        host.session.roomCode,
+      ).session.playerId,
     );
   }
   for (const socketId of socketIds) {
@@ -166,7 +175,7 @@ function createHarness(
   return {
     roomManager,
     gameManager,
-    roomCode: host.roomCode,
+    roomCode: host.session.roomCode,
     socketIds,
     playerIds,
     firstStart,
@@ -229,13 +238,13 @@ function finishGame(harness: RematchHarness): PublicFinishedState {
       throw new Error("Le salon et son dessinateur devraient exister.");
     }
 
-    harness.gameManager.submitDrawing(drawer.socketId, {
+    harness.gameManager.submitDrawing(requireSocketId(drawer), {
       drawing: createDrawing(),
     });
     for (const voter of room.players.filter(
       (player) => player.id !== drawer.id,
     )) {
-      harness.gameManager.submitGuess(voter.socketId, {
+      harness.gameManager.submitGuess(requireSocketId(voter), {
         turnId: drawingGame.currentTurn.turnId,
         value: drawingGame.currentTurn.secretLevel,
       });

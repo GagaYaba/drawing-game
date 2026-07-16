@@ -3,7 +3,12 @@ import { randomInt, randomUUID } from "node:crypto";
 import type { PublicPlayer, PublicRoomState } from "@drawing-game/shared";
 
 import { toPublicGameState } from "../game/game-manager.js";
-
+import {
+  createSessionToken,
+  hashSessionToken,
+  isValidSessionToken,
+  verifySessionToken,
+} from "../sessions/session-token.js";
 import {
   getNicknameComparisonKey,
   normalizeNickname,
@@ -18,8 +23,12 @@ import {
   type InternalPlayer,
   type InternalRoom,
   type JoinRoomResult,
+  type PlayerDisconnectionResult,
+  type RestoreSessionRequest,
+  type RestoreSessionResult,
   type RoomDepartureResult,
   type RoomManagerOptions,
+  type SessionRestoreCandidate,
 } from "./room-types.js";
 
 export { RoomManagerError } from "./room-types.js";
@@ -29,11 +38,15 @@ export type {
   InternalPlayer,
   InternalRoom,
   JoinRoomResult,
+  PlayerDisconnectionResult,
   PlayerIdGenerator,
+  RestoreSessionRequest,
+  RestoreSessionResult,
   RoomCodeGenerator,
   RoomDepartureResult,
   RoomErrorCode,
   RoomManagerOptions,
+  SessionRestoreCandidate,
 } from "./room-types.js";
 
 export const MAX_PLAYERS = 8;
@@ -57,12 +70,15 @@ export class RoomManager {
   private readonly codeGenerator: () => string;
   private readonly idGenerator: () => string;
   private readonly clock: () => number;
+  private readonly sessionTokenGenerator: () => string;
   private readonly maxCodeGenerationAttempts: number;
 
   constructor(options: RoomManagerOptions = {}) {
     this.codeGenerator = options.codeGenerator ?? createRandomRoomCode;
     this.idGenerator = options.idGenerator ?? randomUUID;
     this.clock = options.clock ?? Date.now;
+    this.sessionTokenGenerator =
+      options.sessionTokenGenerator ?? createSessionToken;
     this.maxCodeGenerationAttempts =
       options.maxCodeGenerationAttempts ?? DEFAULT_MAX_CODE_GENERATION_ATTEMPTS;
 
@@ -70,7 +86,9 @@ export class RoomManager {
       !Number.isSafeInteger(this.maxCodeGenerationAttempts) ||
       this.maxCodeGenerationAttempts < 1
     ) {
-      throw new RangeError("maxCodeGenerationAttempts doit être un entier positif.");
+      throw new RangeError(
+        "maxCodeGenerationAttempts doit être un entier positif.",
+      );
     }
   }
 
@@ -79,7 +97,7 @@ export class RoomManager {
     const normalizedNickname = normalizeNickname(nickname);
     const code = this.generateUniqueRoomCode();
     const timestamp = this.clock();
-    const player = this.createPlayer(
+    const { player, token } = this.createPlayer(
       socketId,
       normalizedNickname,
       true,
@@ -96,9 +114,12 @@ export class RoomManager {
     this.roomCodeBySocketId.set(socketId, code);
 
     return {
-      roomCode: code,
-      playerId: player.id,
       room: this.toPublicRoomState(room),
+      session: {
+        roomCode: code,
+        playerId: player.id,
+        token,
+      },
     };
   }
 
@@ -145,7 +166,7 @@ export class RoomManager {
       );
     }
 
-    const player = this.createPlayer(
+    const { player, token } = this.createPlayer(
       socketId,
       normalizedNickname,
       false,
@@ -155,9 +176,12 @@ export class RoomManager {
     this.roomCodeBySocketId.set(socketId, code);
 
     return {
-      roomCode: code,
-      playerId: player.id,
       room: this.toPublicRoomState(room),
+      session: {
+        roomCode: code,
+        playerId: player.id,
+        token,
+      },
     };
   }
 
@@ -174,21 +198,257 @@ export class RoomManager {
     return this.removePlayer(socketId, roomCode);
   }
 
-  handleSocketDisconnect(socketId: string): RoomDepartureResult | null {
+  markPlayerDisconnected(
+    socketId: string,
+    disconnectedAt: number,
+    reconnectDeadline: number,
+  ): PlayerDisconnectionResult | null {
     const roomCode = this.roomCodeBySocketId.get(socketId);
 
     if (!roomCode) {
       return null;
     }
 
-    return this.removePlayer(socketId, roomCode);
+    if (
+      !Number.isFinite(disconnectedAt) ||
+      !Number.isFinite(reconnectDeadline) ||
+      reconnectDeadline < disconnectedAt
+    ) {
+      throw new RoomManagerError(
+        "INTERNAL_ERROR",
+        "Le délai de reconnexion du joueur est invalide.",
+      );
+    }
+
+    const room = this.rooms.get(roomCode);
+    const player = room?.players.find(
+      (candidate) => candidate.socketId === socketId,
+    );
+
+    if (!room || !player) {
+      this.roomCodeBySocketId.delete(socketId);
+      return null;
+    }
+
+    this.roomCodeBySocketId.delete(socketId);
+    player.socketId = null;
+    player.isConnected = false;
+    player.disconnectedAt = disconnectedAt;
+    player.reconnectDeadline = reconnectDeadline;
+
+    return {
+      roomCode,
+      playerId: player.id,
+      room: this.toPublicRoomState(room),
+      disconnectedAt,
+      reconnectDeadline,
+    };
+  }
+
+  prepareSessionRestore(
+    socketId: string,
+    payload: {
+      roomCode: string;
+      playerId: string;
+      token: string;
+    },
+    restoredAt: number,
+  ): SessionRestoreCandidate {
+    if (this.roomCodeBySocketId.has(socketId)) {
+      throw new RoomManagerError(
+        "SESSION_ALREADY_ACTIVE",
+        "Cette session est déjà ouverte dans un autre onglet.",
+      );
+    }
+
+    if (!Number.isFinite(restoredAt)) {
+      throw new RoomManagerError(
+        "INTERNAL_ERROR",
+        "Impossible de dater la restauration de session.",
+      );
+    }
+
+    const roomCode = normalizeRoomCode(payload.roomCode);
+    const room = this.rooms.get(roomCode);
+
+    if (!room) {
+      throw new RoomManagerError(
+        "ROOM_NOT_FOUND",
+        "Cette partie n’existe plus.",
+      );
+    }
+
+    const player = room.players.find(
+      (candidate) => candidate.id === payload.playerId,
+    );
+
+    if (!player) {
+      throw new RoomManagerError(
+        "PLAYER_NOT_FOUND",
+        "Ce joueur n’est plus présent dans la partie.",
+      );
+    }
+
+    if (!verifySessionToken(payload.token, player.sessionTokenHash)) {
+      throw new RoomManagerError(
+        "INVALID_SESSION",
+        "La session enregistrée n’est pas valide.",
+      );
+    }
+
+    if (player.isConnected || player.socketId !== null) {
+      throw new RoomManagerError(
+        "SESSION_ALREADY_ACTIVE",
+        "Cette session est déjà ouverte dans un autre onglet.",
+      );
+    }
+
+    if (
+      player.disconnectedAt === null ||
+      player.reconnectDeadline === null
+    ) {
+      throw new RoomManagerError(
+        "INVALID_SESSION",
+        "La session enregistrée n’est pas valide.",
+      );
+    }
+
+    if (restoredAt >= player.reconnectDeadline) {
+      throw new RoomManagerError(
+        "SESSION_EXPIRED",
+        "Le délai de reconnexion est expiré.",
+      );
+    }
+
+    return {
+      roomCode,
+      playerId: player.id,
+      credentials: {
+        roomCode,
+        playerId: player.id,
+        token: payload.token,
+      },
+    };
+  }
+
+  restoreSession(request: RestoreSessionRequest): RestoreSessionResult {
+    const candidate = this.prepareSessionRestore(
+      request.socketId,
+      request,
+      request.restoredAt,
+    );
+    const room = this.rooms.get(candidate.roomCode);
+    const player = room?.players.find(
+      (currentPlayer) => currentPlayer.id === candidate.playerId,
+    );
+
+    if (!room || !player) {
+      throw new RoomManagerError(
+        "PLAYER_NOT_FOUND",
+        "Ce joueur n’est plus présent dans la partie.",
+      );
+    }
+
+    const previousDisconnectedAt = player.disconnectedAt;
+    const previousReconnectDeadline = player.reconnectDeadline;
+    player.socketId = request.socketId;
+    player.isConnected = true;
+    player.disconnectedAt = null;
+    player.reconnectDeadline = null;
+    this.roomCodeBySocketId.set(request.socketId, room.code);
+
+    try {
+      const game = room.game;
+      const isCurrentDrawer =
+        game !== null &&
+        game.currentTurn.drawerPlayerId === player.id;
+      const submittedGuess =
+        game === null ? undefined : game.currentTurn.guesses[player.id];
+
+      return {
+        room: this.toPublicRoomState(room),
+        session: candidate.credentials,
+        privateState: {
+          gameId: game?.gameId ?? null,
+          turnId: game?.currentTurn.turnId ?? null,
+          secretLevel:
+            game !== null && isCurrentDrawer
+              ? game.currentTurn.secretLevel
+              : null,
+          submittedGuess:
+            submittedGuess === undefined
+              ? null
+              : {
+                  value: submittedGuess.value,
+                  submittedAt: submittedGuess.submittedAt,
+                },
+          isCurrentDrawer,
+        },
+      };
+    } catch (error) {
+      this.roomCodeBySocketId.delete(request.socketId);
+      player.socketId = null;
+      player.isConnected = false;
+      player.disconnectedAt = previousDisconnectedAt;
+      player.reconnectDeadline = previousReconnectDeadline;
+
+      if (error instanceof RoomManagerError) {
+        throw error;
+      }
+
+      throw new RoomManagerError(
+        "INTERNAL_ERROR",
+        "Impossible de restaurer la session du joueur.",
+      );
+    }
+  }
+
+  isReconnectExpirationCurrent(
+    roomCode: string,
+    playerId: string,
+    reconnectDeadline: number,
+  ): boolean {
+    const room = this.rooms.get(roomCode);
+    const player = room?.players.find(
+      (candidate) => candidate.id === playerId,
+    );
+
+    return (
+      player !== undefined &&
+      !player.isConnected &&
+      player.socketId === null &&
+      player.reconnectDeadline === reconnectDeadline
+    );
+  }
+
+  removePlayerById(
+    roomCode: string,
+    playerId: string,
+  ): RoomDepartureResult | null {
+    const room = this.rooms.get(roomCode);
+    const playerIndex = room?.players.findIndex(
+      (player) => player.id === playerId,
+    );
+
+    if (!room || playerIndex === undefined || playerIndex < 0) {
+      return null;
+    }
+
+    return this.removePlayerAtIndex(room, playerIndex);
   }
 
   setPlayerReady(
-    socketId: string,
+    socketId: string | null,
     isReady: boolean,
   ): PublicRoomState {
     const readyStatus = validateReadyStatus(isReady);
+    if (socketId === null) {
+      throw new RoomManagerError(
+        "NOT_IN_ROOM",
+        "Cette connexion n'appartient à aucun salon.",
+      );
+    }
+
     const roomCode = this.roomCodeBySocketId.get(socketId);
 
     if (!roomCode) {
@@ -210,7 +470,6 @@ export class RoomManager {
         "Le joueur associé à cette connexion est introuvable.",
       );
     }
-
 
     if (room.game !== null) {
       throw new RoomManagerError(
@@ -236,7 +495,13 @@ export class RoomManager {
     }
   }
 
-  getPlayerRoomBySocketId(socketId: string): InternalRoom | undefined {
+  getPlayerRoomBySocketId(
+    socketId: string | null,
+  ): InternalRoom | undefined {
+    if (socketId === null) {
+      return undefined;
+    }
+
     const roomCode = this.roomCodeBySocketId.get(socketId);
     return roomCode ? this.rooms.get(roomCode) : undefined;
   }
@@ -269,15 +534,42 @@ export class RoomManager {
     nickname: string,
     isHost: boolean,
     joinedAt: number,
-  ): InternalPlayer {
+  ): { player: InternalPlayer; token: string } {
+    let token: unknown;
+
+    try {
+      token = this.sessionTokenGenerator();
+    } catch {
+      throw new RoomManagerError(
+        "INTERNAL_ERROR",
+        "Impossible de créer les identifiants privés du joueur.",
+      );
+    }
+
+    if (
+      !isValidSessionToken(token)
+    ) {
+      throw new RoomManagerError(
+        "INTERNAL_ERROR",
+        "Impossible de créer des identifiants privés valides.",
+      );
+    }
+
     return {
-      id: this.idGenerator(),
-      socketId,
-      nickname,
-      isHost,
-      isReady: false,
-      joinedAt,
-      score: 0,
+      player: {
+        id: this.idGenerator(),
+        socketId,
+        nickname,
+        isHost,
+        isReady: false,
+        isConnected: true,
+        joinedAt,
+        score: 0,
+        sessionTokenHash: hashSessionToken(token),
+        disconnectedAt: null,
+        reconnectDeadline: null,
+      },
+      token,
     };
   }
 
@@ -326,8 +618,14 @@ export class RoomManager {
       );
     }
 
+    return this.removePlayerAtIndex(room, playerIndex);
+  }
+
+  private removePlayerAtIndex(
+    room: InternalRoom,
+    playerIndex: number,
+  ): RoomDepartureResult {
     const [departingPlayer] = room.players.splice(playerIndex, 1);
-    this.roomCodeBySocketId.delete(socketId);
 
     if (!departingPlayer) {
       throw new RoomManagerError(
@@ -336,11 +634,15 @@ export class RoomManager {
       );
     }
 
+    if (departingPlayer.socketId !== null) {
+      this.roomCodeBySocketId.delete(departingPlayer.socketId);
+    }
+
     if (room.players.length === 0) {
-      this.rooms.delete(roomCode);
+      this.rooms.delete(room.code);
 
       return {
-        roomCode,
+        roomCode: room.code,
         playerId: departingPlayer.id,
         room: null,
         roomDeleted: true,
@@ -359,7 +661,7 @@ export class RoomManager {
     }
 
     return {
-      roomCode,
+      roomCode: room.code,
       playerId: departingPlayer.id,
       room: this.toPublicRoomState(room),
       roomDeleted: false,
@@ -372,6 +674,8 @@ export class RoomManager {
       nickname: player.nickname,
       isHost: player.isHost,
       isReady: player.isReady,
+      isConnected: player.isConnected,
+      reconnectDeadline: player.reconnectDeadline,
       score: player.score,
     }));
     const allPlayersReady =
@@ -387,7 +691,8 @@ export class RoomManager {
       canStart:
         room.game === null &&
         players.length >= MINIMUM_PLAYERS_TO_START &&
-        allPlayersReady,
+        allPlayersReady &&
+        players.every((player) => player.isConnected),
       game:
         room.game === null
           ? null

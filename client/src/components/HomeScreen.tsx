@@ -5,6 +5,7 @@ interface HomeScreenProps {
   roomCode: string;
   pendingAction: PendingRoomAction;
   errorMessage: string | null;
+  isConnectionBlocked?: boolean;
   onNicknameChange: (nickname: string) => void;
   onRoomCodeChange: (roomCode: string) => void;
   onCreateRoom: () => void;
@@ -16,12 +17,13 @@ export function HomeScreen({
   roomCode,
   pendingAction,
   errorMessage,
+  isConnectionBlocked = false,
   onNicknameChange,
   onRoomCodeChange,
   onCreateRoom,
   onJoinRoom,
 }: HomeScreenProps) {
-  const isPending = pendingAction !== null;
+  const isPending = pendingAction !== null || isConnectionBlocked;
 
   const handleJoinSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -121,9 +123,11 @@ export function HomeScreen({
 
       {isPending && (
         <p className="visually-hidden" role="status" aria-live="polite">
-          {pendingAction === "create"
-            ? "Création du salon en cours."
-            : "Connexion au salon en cours."}
+          {isConnectionBlocked
+            ? "Les actions sont indisponibles pendant la restauration de la session."
+            : pendingAction === "create"
+              ? "Création du salon en cours."
+              : "Connexion au salon en cours."}
         </p>
       )}
     </section>

@@ -26,6 +26,14 @@ import {
 const ROOM_CODE = "7KXMP";
 const INTRO_DURATION_MS = 3_000;
 
+function requireSocketId(player: { socketId: string | null }): string {
+  if (player.socketId === null) {
+    throw new Error("Le joueur de test devrait être connecté.");
+  }
+
+  return player.socketId;
+}
+
 interface PreparedRoom {
   roomManager: RoomManager;
   roomCode: string;
@@ -75,20 +83,20 @@ function prepareRoom(playerCount: number): PreparedRoom {
     (_, index) => `socket-${index + 1}`,
   );
   const host = roomManager.createRoom(socketIds[0]!, "J1");
-  const playerIds = [host.playerId];
+  const playerIds = [host.session.playerId];
 
   for (let index = 1; index < playerCount; index += 1) {
     const joined = roomManager.joinRoom(
       socketIds[index]!,
       `J${index + 1}`,
-      host.roomCode,
+      host.session.roomCode,
     );
-    playerIds.push(joined.playerId);
+    playerIds.push(joined.session.playerId);
   }
 
   return {
     roomManager,
-    roomCode: host.roomCode,
+    roomCode: host.session.roomCode,
     socketIds,
     playerIds,
   };
@@ -233,7 +241,7 @@ function completeCurrentTurn(harness: ProgressionHarness): InternalGame {
   }
 
   harness.advanceClock();
-  harness.gameManager.submitDrawing(drawer.socketId, {
+  harness.gameManager.submitDrawing(requireSocketId(drawer), {
     drawing: createDrawing(),
   });
 
@@ -248,7 +256,7 @@ function completeCurrentTurn(harness: ProgressionHarness): InternalGame {
 
   for (const voter of voters) {
     harness.advanceClock();
-    harness.gameManager.submitGuess(voter.socketId, {
+    harness.gameManager.submitGuess(requireSocketId(voter), {
       turnId: votingGame.currentTurn.turnId,
       value: votingGame.currentTurn.secretLevel,
     });
@@ -597,11 +605,11 @@ describe("GameManager turn progression", () => {
     }
 
     harness.advanceClock();
-    harness.gameManager.submitDrawing(drawer.socketId, {
+    harness.gameManager.submitDrawing(requireSocketId(drawer), {
       drawing: createDrawing(),
     });
     harness.advanceClock();
-    harness.gameManager.submitGuess(voters[0]!.socketId, {
+    harness.gameManager.submitGuess(requireSocketId(voters[0]!), {
       turnId: drawingGame.currentTurn.turnId,
       value: 1,
     });
@@ -613,7 +621,7 @@ describe("GameManager turn progression", () => {
     harness.advanceClock();
     expectRoomError(
       () =>
-        harness.gameManager.submitGuess(voters[1]!.socketId, {
+        harness.gameManager.submitGuess(requireSocketId(voters[1]!), {
           turnId: votingGame.currentTurn.turnId,
           value: 1,
         }),
@@ -662,7 +670,7 @@ describe("GameManager continuation authorization", () => {
     }
     room.players.forEach((player, index) => {
       player.score = 10 + index;
-      prepared.roomManager.setPlayerReady(player.socketId, true);
+      prepared.roomManager.setPlayerReady(requireSocketId(player), true);
     });
 
     const prompts = createPrompts(6);

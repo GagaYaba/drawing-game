@@ -1,5 +1,8 @@
 import type { ReactNode } from "react";
 
+import {
+  ConnectionRecoveryOverlay,
+} from "./components/ConnectionRecoveryOverlay";
 import { ConnectionPanel } from "./components/ConnectionPanel";
 import { DrawingScreen } from "./components/DrawingScreen";
 import { FinishedScreen } from "./components/FinishedScreen";
@@ -77,81 +80,102 @@ export function App() {
       : null;
 
   return (
-    <AppLayout isGameActive={isGameActive}>
-      {room === null ? (
-        <HomeScreen
-          nickname={roomSession.nickname}
-          roomCode={roomSession.roomCode}
-          pendingAction={roomSession.pendingAction}
-          errorMessage={roomSession.errorMessage}
-          onNicknameChange={roomSession.setNickname}
-          onRoomCodeChange={roomSession.setRoomCode}
-          onCreateRoom={roomSession.createRoom}
-          onJoinRoom={roomSession.joinRoom}
-        />
-      ) : game === null || game.phase === "LOBBY" ? (
-        <LobbyScreen
-          room={room}
-          currentPlayerId={currentPlayerId}
-          pendingAction={roomSession.pendingAction}
-          errorMessage={roomSession.errorMessage}
-          noticeMessage={roomSession.noticeMessage}
-          onSetReady={roomSession.setReady}
-          onStartGame={roomSession.startGame}
-          onLeaveRoom={roomSession.leaveRoom}
-        />
-      ) : game.phase === "ROUND_INTRO" ? (
-        <RoundIntroScreen
-          game={game}
-          currentPlayerId={currentPlayerId}
-          secretLevel={currentPlayerSecret}
-          pendingAction={roomSession.pendingAction}
-          errorMessage={roomSession.errorMessage}
-          onLeaveRoom={roomSession.leaveRoom}
-        />
-      ) : game.phase === "DRAWING" ? (
-        <DrawingScreen
-          game={game}
-          currentPlayerId={currentPlayerId}
-          secretLevel={currentPlayerSecret}
-          pendingAction={roomSession.pendingAction}
-          errorMessage={roomSession.errorMessage}
-          onSubmitDrawing={roomSession.submitDrawing}
-          onLeaveRoom={roomSession.leaveRoom}
-        />
-      ) : game.phase === "VOTING" ? (
-        <VotingScreen
-          game={game}
-          currentPlayerId={currentPlayerId}
-          secretLevel={currentPlayerSecret}
-          guessState={roomSession.guessState}
-          pendingAction={roomSession.pendingAction}
-          errorMessage={roomSession.errorMessage}
-          onSelectGuess={roomSession.selectGuess}
-          onSubmitGuess={roomSession.submitGuess}
-          onLeaveRoom={roomSession.leaveRoom}
-        />
-      ) : game.phase === "REVEAL" ? (
-        <RevealScreen
-          game={game}
-          currentPlayerId={currentPlayerId}
-          isHost={currentPlayer?.isHost ?? false}
-          pendingAction={roomSession.pendingAction}
-          errorMessage={roomSession.errorMessage}
-          onContinueGame={roomSession.continueGame}
-          onLeaveRoom={roomSession.leaveRoom}
-        />
-      ) : (
-        <FinishedScreen
-          finished={game.finished}
-          currentPlayerId={currentPlayerId}
-          isHost={currentPlayer?.isHost ?? false}
-          pendingAction={roomSession.pendingAction}
-          errorMessage={roomSession.errorMessage}
-          onRequestRematch={roomSession.requestRematch}
-          onLeaveRoom={roomSession.leaveRoom}
-        />
-      )}
-    </AppLayout>
+    <>
+      <AppLayout isGameActive={isGameActive}>
+        {room === null ? (
+          <HomeScreen
+            nickname={roomSession.nickname}
+            roomCode={roomSession.roomCode}
+            pendingAction={roomSession.pendingAction}
+            errorMessage={roomSession.errorMessage}
+            isConnectionBlocked={roomSession.isConnectionBlocked}
+            onNicknameChange={roomSession.setNickname}
+            onRoomCodeChange={roomSession.setRoomCode}
+            onCreateRoom={roomSession.createRoom}
+            onJoinRoom={roomSession.joinRoom}
+          />
+        ) : game === null || game.phase === "LOBBY" ? (
+          <LobbyScreen
+            room={room}
+            currentPlayerId={currentPlayerId}
+            pendingAction={roomSession.pendingAction}
+            errorMessage={roomSession.errorMessage}
+            noticeMessage={roomSession.noticeMessage}
+            isConnectionBlocked={roomSession.isConnectionBlocked}
+            onSetReady={roomSession.setReady}
+            onStartGame={roomSession.startGame}
+            onLeaveRoom={roomSession.leaveRoom}
+          />
+        ) : game.phase === "ROUND_INTRO" ? (
+          <RoundIntroScreen
+            game={game}
+            currentPlayerId={currentPlayerId}
+            secretLevel={currentPlayerSecret}
+            pendingAction={roomSession.pendingAction}
+            errorMessage={roomSession.errorMessage}
+            players={room.players}
+            isConnectionBlocked={roomSession.isConnectionBlocked}
+            onLeaveRoom={roomSession.leaveRoom}
+          />
+        ) : game.phase === "DRAWING" ? (
+          <DrawingScreen
+            roomCode={room.code}
+            game={game}
+            currentPlayerId={currentPlayerId}
+            secretLevel={currentPlayerSecret}
+            pendingAction={roomSession.pendingAction}
+            errorMessage={roomSession.errorMessage}
+            players={room.players}
+            isConnectionBlocked={roomSession.isConnectionBlocked}
+            onSubmitDrawing={roomSession.submitDrawing}
+            onLeaveRoom={roomSession.leaveRoom}
+          />
+        ) : game.phase === "VOTING" ? (
+          <VotingScreen
+            game={game}
+            currentPlayerId={currentPlayerId}
+            secretLevel={currentPlayerSecret}
+            guessState={roomSession.guessState}
+            pendingAction={roomSession.pendingAction}
+            errorMessage={roomSession.errorMessage}
+            players={room.players}
+            isConnectionBlocked={roomSession.isConnectionBlocked}
+            onSelectGuess={roomSession.selectGuess}
+            onSubmitGuess={roomSession.submitGuess}
+            onLeaveRoom={roomSession.leaveRoom}
+          />
+        ) : game.phase === "REVEAL" ? (
+          <RevealScreen
+            game={game}
+            currentPlayerId={currentPlayerId}
+            isHost={currentPlayer?.isHost ?? false}
+            pendingAction={roomSession.pendingAction}
+            errorMessage={roomSession.errorMessage}
+            players={room.players}
+            isConnectionBlocked={roomSession.isConnectionBlocked}
+            onContinueGame={roomSession.continueGame}
+            onLeaveRoom={roomSession.leaveRoom}
+          />
+        ) : (
+          <FinishedScreen
+            finished={game.finished}
+            currentPlayerId={currentPlayerId}
+            isHost={currentPlayer?.isHost ?? false}
+            pendingAction={roomSession.pendingAction}
+            errorMessage={roomSession.errorMessage}
+            players={room.players}
+            isConnectionBlocked={roomSession.isConnectionBlocked}
+            onRequestRematch={roomSession.requestRematch}
+            onLeaveRoom={roomSession.leaveRoom}
+          />
+        )}
+      </AppLayout>
+      <ConnectionRecoveryOverlay
+        status={roomSession.connectionStatus}
+        announcement={roomSession.connectionAnnouncement}
+        hasStoredSession={roomSession.hasStoredSession}
+        onRetry={roomSession.retrySessionRestore}
+      />
+    </>
   );
 }

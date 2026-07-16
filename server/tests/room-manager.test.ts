@@ -50,29 +50,34 @@ describe("RoomManager", () => {
 
     const result = manager.createRoom("socket-host", "Romane");
 
-    expect(result).toEqual({
+    expect(result.session).toMatchObject({
       roomCode: "7KXMP",
       playerId: "player-1",
-      room: {
-        code: "7KXMP",
-        players: [
-          {
-            id: "player-1",
-            nickname: "Romane",
-            isHost: true,
-            isReady: false,
-            score: 0,
-          },
-        ],
-        playerCount: 1,
-        maxPlayers: 8,
-        minimumPlayersToStart: 3,
-        allPlayersReady: false,
-        canStart: false,
-        game: null,
-      },
+      token: expect.any(String),
+    });
+    expect(result.room).toEqual({
+      code: "7KXMP",
+      players: [
+        {
+          id: "player-1",
+          nickname: "Romane",
+          isHost: true,
+          isReady: false,
+          isConnected: true,
+          reconnectDeadline: null,
+          score: 0,
+        },
+      ],
+      playerCount: 1,
+      maxPlayers: 8,
+      minimumPlayersToStart: 3,
+      allPlayersReady: false,
+      canStart: false,
+      game: null,
     });
     expect(result.room.players[0]).not.toHaveProperty("socketId");
+    expect(result.room.players[0]).not.toHaveProperty("sessionTokenHash");
+    expect(JSON.stringify(result.room)).not.toContain(result.session.token);
   });
 
   it("réessaie la génération jusqu'à obtenir un code unique", () => {
@@ -81,8 +86,12 @@ describe("RoomManager", () => {
       codeGenerator: () => generatedCodes.shift() ?? "LMNPQ",
     });
 
-    expect(manager.createRoom("socket-1", "Alice").roomCode).toBe("ABCDE");
-    expect(manager.createRoom("socket-2", "Bruno").roomCode).toBe("FGHJK");
+    expect(manager.createRoom("socket-1", "Alice").session.roomCode).toBe(
+      "ABCDE",
+    );
+    expect(manager.createRoom("socket-2", "Bruno").session.roomCode).toBe(
+      "FGHJK",
+    );
   });
 
   it("normalise le pseudonyme et réduit les espaces consécutifs", () => {
@@ -136,7 +145,7 @@ describe("RoomManager", () => {
 
     const result = manager.joinRoom("socket-2", "Bruno", "  7kxmp ");
 
-    expect(result.roomCode).toBe("7KXMP");
+    expect(result.session.roomCode).toBe("7KXMP");
     expect(result.room.players).toHaveLength(2);
     expect(result.room.players[1]).toMatchObject({
       id: "player-2",
@@ -231,7 +240,7 @@ describe("RoomManager", () => {
 
     expect(result).toMatchObject({
       roomCode: "7KXMP",
-      playerId: joined.playerId,
+      playerId: joined.session.playerId,
       roomDeleted: false,
     });
     expect(result.room?.players.map((player) => player.nickname)).toEqual([
@@ -260,7 +269,18 @@ describe("RoomManager", () => {
     manager.joinRoom("socket-later", "Bruno", "7KXMP");
     manager.joinRoom("socket-older", "Chloé", "7KXMP");
 
-    const result = manager.handleSocketDisconnect("socket-host");
+    const disconnected = manager.markPlayerDisconnected(
+      "socket-host",
+      500,
+      600,
+    );
+    if (disconnected === null) {
+      throw new Error("L’hôte aurait dû être marqué déconnecté.");
+    }
+    const result = manager.removePlayerById(
+      disconnected.roomCode,
+      disconnected.playerId,
+    );
 
     expect(result?.room?.players.filter((player) => player.isHost)).toEqual([
       expect.objectContaining({ nickname: "Chloé" }),
@@ -285,7 +305,9 @@ describe("RoomManager", () => {
   it("traite sans erreur la déconnexion d'un socket hors salon", () => {
     const manager = createTestManager();
 
-    expect(manager.handleSocketDisconnect("unknown-socket")).toBeNull();
+    expect(
+      manager.markPlayerDisconnected("unknown-socket", 500, 600),
+    ).toBeNull();
     expectRoomError(
       () => manager.leaveRoom("unknown-socket"),
       "NOT_IN_ROOM",

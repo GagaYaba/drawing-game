@@ -755,7 +755,7 @@ export class GameManager {
     }
   }
 
-  startGame(socketId: string): StartGameInternalResult {
+  startGame(socketId: string | null): StartGameInternalResult {
     const room = this.roomManager.getPlayerRoomBySocketId(socketId);
 
     if (room === undefined) {
@@ -803,6 +803,17 @@ export class GameManager {
       );
     }
 
+    if (
+      !room.players.every(
+        (player) => player.isConnected && player.socketId !== null,
+      )
+    ) {
+      throw new RoomManagerError(
+        "PLAYERS_NOT_READY",
+        "Tous les joueurs doivent être reconnectés avant de lancer la partie.",
+      );
+    }
+
     const playerIds = room.players.map((player) => player.id);
     let turnOrder: string[];
 
@@ -828,6 +839,13 @@ export class GameManager {
       throw new RoomManagerError(
         "INTERNAL_ERROR",
         "Impossible de sélectionner le premier dessinateur.",
+      );
+    }
+
+    if (drawer.socketId === null) {
+      throw new RoomManagerError(
+        "PLAYERS_NOT_READY",
+        "Le dessinateur doit être reconnecté avant de lancer la partie.",
       );
     }
 
@@ -897,7 +915,7 @@ export class GameManager {
   }
 
   submitDrawing(
-    socketId: string,
+    socketId: string | null,
     payload: unknown,
   ): SubmitDrawingInternalResult {
     const room = this.roomManager.getPlayerRoomBySocketId(socketId);
@@ -995,7 +1013,7 @@ export class GameManager {
   }
 
   submitGuess(
-    socketId: string,
+    socketId: string | null,
     payload: unknown,
   ): SubmitGuessInternalResult {
     const room = this.roomManager.getPlayerRoomBySocketId(socketId);
@@ -1135,7 +1153,7 @@ export class GameManager {
     }
   }
 
-  continueGame(socketId: string): ContinueGameInternalResult {
+  continueGame(socketId: string | null): ContinueGameInternalResult {
     const room = this.roomManager.getPlayerRoomBySocketId(socketId);
     if (room === undefined) {
       throw new RoomManagerError(
@@ -1307,7 +1325,7 @@ export class GameManager {
     }
   }
 
-  requestRematch(socketId: string): RequestRematchInternalResult {
+  requestRematch(socketId: string | null): RequestRematchInternalResult {
     const room = this.roomManager.getPlayerRoomBySocketId(socketId);
     if (room === undefined) {
       throw new RoomManagerError(

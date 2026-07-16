@@ -24,10 +24,18 @@ import {
 } from "./drawing-document";
 import { DrawingCanvas } from "./DrawingCanvas";
 import { DrawingToolbar } from "./DrawingToolbar";
+import {
+  clearStoredDrawingDraft,
+  matchesDrawingDraftContext,
+  readStoredDrawingDraft,
+  writeStoredDrawingDraft,
+  type DrawingDraftContext,
+} from "../../session/stored-drawing-draft";
 
 interface DrawingEditorProps {
   disabled: boolean;
   isSubmitting: boolean;
+  draftContext: DrawingDraftContext;
   onSubmit: (drawing: DrawingDocument) => boolean;
   sidebarHeader: ReactNode;
   sidebarFooter: ReactNode;
@@ -37,19 +45,52 @@ const DEFAULT_TOOL: DrawingTool = "pen";
 const DEFAULT_COLOR: DrawingColor = DRAWING_COLOR_PALETTE[0];
 const DEFAULT_WIDTH: DrawingStrokeWidth = 8;
 
+function getInitialEditorState(context: DrawingDraftContext) {
+  const draft = readStoredDrawingDraft();
+  if (draft !== null && !matchesDrawingDraftContext(draft, context)) {
+    clearStoredDrawingDraft();
+  }
+
+  if (draft === null || !matchesDrawingDraftContext(draft, context)) {
+    return {
+      strokes: [] as DrawingStroke[],
+      selectedTool: DEFAULT_TOOL,
+      selectedColor: DEFAULT_COLOR,
+      selectedWidth: DEFAULT_WIDTH,
+    };
+  }
+
+  return {
+    strokes: draft.drawing.strokes,
+    selectedTool: draft.selectedTool,
+    selectedColor: draft.selectedColor,
+    selectedWidth: draft.selectedWidth,
+  };
+}
+
 export function DrawingEditor({
   disabled,
   isSubmitting,
+  draftContext,
   onSubmit,
   sidebarHeader,
   sidebarFooter,
 }: DrawingEditorProps) {
-  const [strokes, setStrokes] = useState<DrawingStroke[]>([]);
-  const [selectedTool, setSelectedTool] = useState<DrawingTool>(DEFAULT_TOOL);
-  const [selectedColor, setSelectedColor] =
-    useState<DrawingColor>(DEFAULT_COLOR);
-  const [selectedWidth, setSelectedWidth] =
-    useState<DrawingStrokeWidth>(DEFAULT_WIDTH);
+  const [initialEditorState] = useState(() =>
+    getInitialEditorState(draftContext),
+  );
+  const [strokes, setStrokes] = useState<DrawingStroke[]>(
+    initialEditorState.strokes,
+  );
+  const [selectedTool, setSelectedTool] = useState<DrawingTool>(
+    initialEditorState.selectedTool,
+  );
+  const [selectedColor, setSelectedColor] = useState<DrawingColor>(
+    initialEditorState.selectedColor,
+  );
+  const [selectedWidth, setSelectedWidth] = useState<DrawingStrokeWidth>(
+    initialEditorState.selectedWidth,
+  );
   const [isStrokeActive, setIsStrokeActive] = useState(false);
   const [limitMessage, setLimitMessage] = useState<string | null>(null);
   const submissionRequestedRef = useRef(false);
@@ -59,6 +100,26 @@ export function DrawingEditor({
       submissionRequestedRef.current = false;
     }
   }, [isSubmitting]);
+
+  useEffect(() => {
+    writeStoredDrawingDraft({
+      ...draftContext,
+      drawing: createDrawingDocument(strokes),
+      selectedTool,
+      selectedColor,
+      selectedWidth,
+      savedAt: Date.now(),
+    });
+  }, [
+    draftContext.gameId,
+    draftContext.playerId,
+    draftContext.roomCode,
+    draftContext.turnId,
+    selectedColor,
+    selectedTool,
+    selectedWidth,
+    strokes,
+  ]);
 
   const totalPointCount = useMemo(
     () => countDrawingPoints(strokes),

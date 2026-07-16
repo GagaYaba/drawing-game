@@ -11,8 +11,12 @@ const DRAWER: InternalPlayer = {
   nickname: "Dessinatrice",
   isHost: true,
   isReady: true,
+  isConnected: true,
   joinedAt: 1_000,
   score: 0,
+  sessionTokenHash: "drawer-session-token-hash",
+  disconnectedAt: null,
+  reconnectDeadline: null,
 };
 
 function createGame(prompt: DrawingPrompt): InternalGame {

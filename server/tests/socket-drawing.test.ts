@@ -14,6 +14,7 @@ import {
   type ClientToServerEvents,
   type DrawingDocument,
   type GameCancelledPayload,
+  type PlayerSessionCredentials,
   type PublicGameState,
   type PublicRoomState,
   type RoomErrorCode,
@@ -38,7 +39,7 @@ type DrawingGameServer = ReturnType<typeof createDrawingGameServer>;
 
 interface PreparedRoom {
   sockets: TestClient[];
-  sessions: RoomSessionData[];
+  sessions: PlayerSessionCredentials[];
   roomCode: string;
 }
 
@@ -371,7 +372,7 @@ async function prepareRoom(nicknamePrefix: string): Promise<PreparedRoom> {
   const hostSession = expectSuccess(
     await createRoom(sockets[0]!, `${nicknamePrefix}1`),
   );
-  const sessions = [hostSession];
+  const sessions = [hostSession.session];
 
   for (let index = 1; index < sockets.length; index += 1) {
     sessions.push(
@@ -379,9 +380,9 @@ async function prepareRoom(nicknamePrefix: string): Promise<PreparedRoom> {
         await joinRoom(
           sockets[index]!,
           `${nicknamePrefix}${index + 1}`,
-          hostSession.roomCode,
+          hostSession.session.roomCode,
         ),
-      ),
+      ).session,
     );
   }
 
@@ -389,7 +390,11 @@ async function prepareRoom(nicknamePrefix: string): Promise<PreparedRoom> {
     expectSuccess(await setReady(socket));
   }
 
-  return { sockets, sessions, roomCode: hostSession.roomCode };
+  return {
+    sockets,
+    sessions,
+    roomCode: hostSession.session.roomCode,
+  };
 }
 
 async function startAndWaitForDrawing(
@@ -411,6 +416,7 @@ beforeEach(async () => {
   clients = [];
   const createdServer = createDrawingGameServer({
     serveClient: false,
+    reconnectGraceMs: 0,
     gameManagerOptions: {
       introDurationMs: INTRO_DURATION_MS,
       prompts: [TEST_PROMPT],
@@ -850,7 +856,7 @@ describe("Socket.IO drawing submission integration", () => {
       ]);
 
       for (const cancellation of receivedCancellations) {
-        expect(cancellation.reason).toBe("PLAYER_DISCONNECTED");
+        expect(cancellation.reason).toBe("RECONNECT_TIMEOUT");
       }
       for (const state of receivedLobbyStates) {
         expect(state.game).toBeNull();

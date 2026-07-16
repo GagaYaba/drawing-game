@@ -51,6 +51,8 @@ const LOBBY_ROOM: PublicRoomState = {
       nickname: "Camille",
       isHost: true,
       isReady: false,
+      isConnected: true,
+      reconnectDeadline: null,
       score: 0,
     },
     {
@@ -58,6 +60,8 @@ const LOBBY_ROOM: PublicRoomState = {
       nickname: "Élodie",
       isHost: false,
       isReady: false,
+      isConnected: true,
+      reconnectDeadline: null,
       score: 0,
     },
   ],

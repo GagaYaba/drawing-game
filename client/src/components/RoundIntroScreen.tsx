@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import type { PublicGameState } from "@drawing-game/shared";
+import type { PublicGameState, PublicPlayer } from "@drawing-game/shared";
 
 import type { PendingRoomAction } from "../hooks/useRoomSession";
 import { GameLeaveAction } from "./game/GameLeaveAction";
@@ -10,6 +10,7 @@ import {
   GamePromptValue,
 } from "./game/GamePromptHeader";
 import { GameStatusPanel } from "./game/GameStatusPanel";
+import { DisconnectedPlayersNotice } from "./PlayerConnectionStatus";
 import { ScaleGauge } from "./scale/ScaleGauge";
 
 interface RoundIntroScreenProps {
@@ -18,6 +19,8 @@ interface RoundIntroScreenProps {
   secretLevel: number | null;
   pendingAction: PendingRoomAction;
   errorMessage: string | null;
+  players?: readonly PublicPlayer[];
+  isConnectionBlocked?: boolean;
   onLeaveRoom: () => void;
 }
 
@@ -35,13 +38,15 @@ export function RoundIntroScreen({
   secretLevel,
   pendingAction,
   errorMessage,
+  players,
+  isConnectionBlocked = false,
   onLeaveRoom,
 }: RoundIntroScreenProps) {
   const [secondsRemaining, setSecondsRemaining] = useState(() =>
     getSecondsRemaining(game.phaseEndsAt),
   );
   const isDrawer = currentPlayerId === game.currentDrawer.id;
-  const isPending = pendingAction !== null;
+  const isPending = pendingAction !== null || isConnectionBlocked;
 
   useEffect(() => {
     const updateCountdown = () => {
@@ -119,6 +124,7 @@ export function RoundIntroScreen({
 
       <aside className="game-phase-layout__sidebar">
         <GameStatusPanel game={game} />
+        <DisconnectedPlayersNotice players={players} />
 
         {errorMessage !== null && (
           <p

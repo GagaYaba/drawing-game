@@ -1,6 +1,7 @@
 import type {
   PublicDrawerResult,
   PublicGameState,
+  PublicPlayer,
 } from "@drawing-game/shared";
 
 import type { PendingRoomAction } from "../hooks/useRoomSession";
@@ -13,6 +14,7 @@ import {
   GamePromptValue,
 } from "./game/GamePromptHeader";
 import { GameStatusPanel } from "./game/GameStatusPanel";
+import { DisconnectedPlayersNotice } from "./PlayerConnectionStatus";
 import { ScaleGauge } from "./scale/ScaleGauge";
 
 interface RevealScreenProps {
@@ -21,6 +23,8 @@ interface RevealScreenProps {
   isHost: boolean;
   pendingAction: PendingRoomAction;
   errorMessage: string | null;
+  players?: readonly PublicPlayer[];
+  isConnectionBlocked?: boolean;
   onContinueGame: () => boolean;
   onLeaveRoom: () => void;
 }
@@ -61,11 +65,13 @@ export function RevealScreen({
   isHost,
   pendingAction,
   errorMessage,
+  players,
+  isConnectionBlocked = false,
   onContinueGame,
   onLeaveRoom,
 }: RevealScreenProps) {
   const reveal = game.reveal;
-  const isPending = pendingAction !== null;
+  const isPending = pendingAction !== null || isConnectionBlocked;
   const isContinuing = pendingAction === "continue";
   const continueLabel =
     reveal?.nextDrawer === null
@@ -116,6 +122,7 @@ export function RevealScreen({
 
       <aside className="game-phase-layout__sidebar reveal-sidebar">
         <GameStatusPanel game={game} />
+        <DisconnectedPlayersNotice players={players} />
 
         {errorMessage !== null && (
           <p

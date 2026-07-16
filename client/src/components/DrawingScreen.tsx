@@ -1,6 +1,7 @@
 import type {
   DrawingDocument,
   PublicGameState,
+  PublicPlayer,
 } from "@drawing-game/shared";
 
 import type { PendingRoomAction } from "../hooks/useRoomSession";
@@ -12,29 +13,36 @@ import {
   GamePromptValue,
 } from "./game/GamePromptHeader";
 import { GameStatusPanel } from "./game/GameStatusPanel";
+import { DisconnectedPlayersNotice } from "./PlayerConnectionStatus";
 import { ScaleGauge } from "./scale/ScaleGauge";
 
 interface DrawingScreenProps {
+  roomCode?: string;
   game: PublicGameState;
   currentPlayerId: string | null;
   secretLevel: number | null;
   pendingAction: PendingRoomAction;
   errorMessage: string | null;
+  players?: readonly PublicPlayer[];
+  isConnectionBlocked?: boolean;
   onSubmitDrawing: (drawing: DrawingDocument) => boolean;
   onLeaveRoom: () => void;
 }
 
 export function DrawingScreen({
+  roomCode = "",
   game,
   currentPlayerId,
   secretLevel,
   pendingAction,
   errorMessage,
+  players,
+  isConnectionBlocked = false,
   onSubmitDrawing,
   onLeaveRoom,
 }: DrawingScreenProps) {
   const isDrawer = currentPlayerId === game.currentDrawer.id;
-  const isPending = pendingAction !== null;
+  const isPending = pendingAction !== null || isConnectionBlocked;
   const isSubmitting = pendingAction === "submitDrawing";
   const promptHeader = (
     <GamePromptHeader
@@ -77,12 +85,20 @@ export function DrawingScreen({
     >
       {isDrawer ? (
         <DrawingEditor
+          key={`${game.gameId}:${game.turnId}:${currentPlayerId ?? ""}`}
           disabled={isPending || secretLevel === null}
           isSubmitting={isSubmitting}
+          draftContext={{
+            roomCode,
+            gameId: game.gameId,
+            turnId: game.turnId,
+            playerId: currentPlayerId ?? "",
+          }}
           onSubmit={onSubmitDrawing}
           sidebarHeader={
             <>
               <GameStatusPanel game={game} />
+              <DisconnectedPlayersNotice players={players} />
               {errorMessage !== null && (
                 <p
                   className="form-message form-message--error game-sidebar-message"
@@ -115,6 +131,7 @@ export function DrawingScreen({
 
           <aside className="game-phase-layout__sidebar">
             <GameStatusPanel game={game} />
+            <DisconnectedPlayersNotice players={players} />
 
             {errorMessage !== null && (
               <p

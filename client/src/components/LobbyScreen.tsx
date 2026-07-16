@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import type { PublicRoomState } from "@drawing-game/shared";
 
 import type { PendingRoomAction } from "../hooks/useRoomSession";
+import { PlayerConnectionStatus } from "./PlayerConnectionStatus";
 
 interface LobbyScreenProps {
   room: PublicRoomState;
@@ -10,6 +11,7 @@ interface LobbyScreenProps {
   pendingAction: PendingRoomAction;
   errorMessage: string | null;
   noticeMessage: string | null;
+  isConnectionBlocked?: boolean;
   onSetReady: (isReady: boolean) => void;
   onStartGame: () => void;
   onLeaveRoom: () => void;
@@ -50,6 +52,7 @@ export function LobbyScreen({
   pendingAction,
   errorMessage,
   noticeMessage,
+  isConnectionBlocked = false,
   onSetReady,
   onStartGame,
   onLeaveRoom,
@@ -60,7 +63,11 @@ export function LobbyScreen({
     (player) => player.id === currentPlayerId,
   );
   const isHost = currentPlayer?.isHost === true;
-  const isPending = pendingAction !== null;
+  const isPending = pendingAction !== null || isConnectionBlocked;
+  const connectedPlayerCount = room.players.filter(
+    (player) => player.isConnected,
+  ).length;
+  const reconnectingPlayerCount = room.players.length - connectedPlayerCount;
 
   useEffect(
     () => () => {
@@ -98,11 +105,14 @@ export function LobbyScreen({
     }
   };
 
-  const readinessMessage = room.canStart
-    ? "Tout le monde est prêt. L’hôte peut lancer la partie."
-    : room.playerCount < room.minimumPlayersToStart
-      ? `Il faut au moins ${room.minimumPlayersToStart} joueurs et tout le monde doit être prêt.`
-      : "Le nombre de joueurs est suffisant. Tout le monde doit encore être prêt.";
+  const readinessMessage =
+    reconnectingPlayerCount > 0
+      ? "Attendez la reconnexion de tous les joueurs."
+      : room.canStart
+        ? "Tout le monde est prêt. L’hôte peut lancer la partie."
+        : room.playerCount < room.minimumPlayersToStart
+          ? `Il faut au moins ${room.minimumPlayersToStart} joueurs et tout le monde doit être prêt.`
+          : "Le nombre de joueurs est suffisant. Tout le monde doit encore être prêt.";
 
   return (
     <section
@@ -162,11 +172,24 @@ export function LobbyScreen({
         <section aria-labelledby="players-title">
           <div className="list-heading">
             <h3 id="players-title">Joueurs</h3>
-            <span>{room.players.length} connecté{room.players.length > 1 ? "s" : ""}</span>
+            <span>
+              {connectedPlayerCount} connecté
+              {connectedPlayerCount === 1 ? "" : "s"}
+              {reconnectingPlayerCount > 0
+                ? ` · ${reconnectingPlayerCount} en reconnexion`
+                : ""}
+            </span>
           </div>
           <ul className="player-list">
             {room.players.map((player) => (
-              <li className="player-row" key={player.id}>
+              <li
+                className={
+                  player.isConnected
+                    ? "player-row"
+                    : "player-row player-row--disconnected"
+                }
+                key={player.id}
+              >
                 <span className="player-avatar" aria-hidden="true">
                   {player.nickname.charAt(0).toLocaleUpperCase("fr")}
                 </span>
@@ -177,10 +200,14 @@ export function LobbyScreen({
                     {player.id === currentPlayerId && <span className="badge">Vous</span>}
                   </span>
                 </span>
-                <span className={`ready-status ${player.isReady ? "ready-status--yes" : ""}`}>
-                  <span aria-hidden="true">{player.isReady ? "✓" : "○"}</span>
-                  {player.isReady ? "Prêt" : "Pas prêt"}
-                </span>
+                {player.isConnected ? (
+                  <span className={`ready-status ${player.isReady ? "ready-status--yes" : ""}`}>
+                    <span aria-hidden="true">{player.isReady ? "✓" : "○"}</span>
+                    {player.isReady ? "Prêt" : "Pas prêt"}
+                  </span>
+                ) : (
+                  <PlayerConnectionStatus player={player} />
+                )}
               </li>
             ))}
           </ul>

@@ -54,7 +54,6 @@ export function ConnectionPanel() {
       socket.off("disconnect", handleDisconnect);
       socket.off("connect_error", handleConnectError);
       socket.off(SOCKET_EVENTS.SERVER_PONG, handlePong);
-      socket.disconnect();
     };
   }, []);
 
