@@ -19,6 +19,7 @@ const GLOBAL_STYLES = readFileSync(
 
 function createGame(drawerNickname = "Camille"): PublicGameState {
   return {
+    gameId: "game-1",
     phase: "DRAWING",
     turnId: "turn-1",
     totalRounds: 2,
@@ -99,6 +100,15 @@ describe("AppLayout", () => {
     );
     expect(GLOBAL_STYLES).toMatch(
       /\.reveal-sidebar__content\s*\{[\s\S]*?grid-auto-rows: max-content;[\s\S]*?align-content: start;/,
+    );
+    expect(GLOBAL_STYLES).toMatch(
+      /\.finished-sidebar \.game-leaderboard\s*\{[\s\S]*?grid-template-rows: auto minmax\(0, 1fr\);[\s\S]*?overflow: hidden;/,
+    );
+    expect(GLOBAL_STYLES).toMatch(
+      /\.finished-sidebar \.game-leaderboard__list\s*\{[\s\S]*?overflow-y: auto;/,
+    );
+    expect(GLOBAL_STYLES).toMatch(
+      /@media \(min-width: 900px\)[\s\S]*?\.game-phase-layout__sidebar\.finished-sidebar\s*\{[\s\S]*?overflow: hidden;/,
     );
   });
 });

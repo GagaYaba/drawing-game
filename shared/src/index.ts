@@ -43,6 +43,8 @@ export type {
   PublicSubmittedDrawing,
   PublicRoomState,
   PublicVotingState,
+  RematchErrorCode,
+  RequestRematchSuccessData,
   RoomErrorCode,
   RoomSessionData,
   SetPlayerReadyPayload,

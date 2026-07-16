@@ -98,6 +98,7 @@ export interface PublicFinishedState {
 }
 
 export interface PublicGameState {
+  gameId: string;
   phase: GamePhase;
   turnId: string;
   totalRounds: number;
@@ -174,6 +175,11 @@ export type ContinueGameErrorCode =
   | "NOT_REVEAL_PHASE"
   | "GAME_ALREADY_FINISHED";
 
+export type RematchErrorCode =
+  | "GAME_NOT_STARTED"
+  | "GAME_NOT_FINISHED"
+  | "NOT_HOST";
+
 export type RoomErrorCode =
   | "INVALID_NICKNAME"
   | "INVALID_ROOM_CODE"
@@ -186,11 +192,13 @@ export type RoomErrorCode =
   | "PLAYER_NOT_FOUND"
   | "INVALID_GAME_START_REQUEST"
   | "INVALID_GAME_CONTINUE_REQUEST"
+  | "INVALID_GAME_REMATCH_REQUEST"
   | "NOT_HOST"
   | "NOT_ENOUGH_PLAYERS"
   | "PLAYERS_NOT_READY"
   | "GAME_ALREADY_STARTED"
   | "GAME_NOT_IN_LOBBY"
+  | "GAME_NOT_FINISHED"
   | "NOT_REVEAL_PHASE"
   | "GAME_ALREADY_FINISHED"
   | "NOT_DRAWING_PHASE"
@@ -229,8 +237,13 @@ export interface ContinueGameSuccessData {
   room: PublicRoomState;
 }
 
+export interface RequestRematchSuccessData {
+  room: PublicRoomState;
+}
+
 export interface TurnSecretPayload {
   roomCode: string;
+  gameId: string;
   turnId: string;
   drawerPlayerId: string;
   secretLevel: number;
@@ -269,6 +282,9 @@ export interface ClientToServerEvents {
   ) => void;
   [SOCKET_EVENTS.GAME_CONTINUE]: (
     acknowledge: ActionAcknowledgement<ContinueGameSuccessData>,
+  ) => void;
+  [SOCKET_EVENTS.GAME_REQUEST_REMATCH]: (
+    acknowledge: ActionAcknowledgement<RequestRematchSuccessData>,
   ) => void;
   [SOCKET_EVENTS.DRAWING_SUBMIT]: (
     payload: SubmitDrawingPayload,

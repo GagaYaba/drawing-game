@@ -8,8 +8,10 @@ import { GamePhaseLayout } from "./game/GamePhaseLayout";
 interface FinishedScreenProps {
   finished: PublicFinishedState | null;
   currentPlayerId: string | null;
+  isHost: boolean;
   pendingAction: PendingRoomAction;
   errorMessage: string | null;
+  onRequestRematch: () => boolean;
   onLeaveRoom: () => void;
 }
 
@@ -46,11 +48,14 @@ function formatResultAnnouncement(finished: PublicFinishedState) {
 export function FinishedScreen({
   finished,
   currentPlayerId,
+  isHost,
   pendingAction,
   errorMessage,
+  onRequestRematch,
   onLeaveRoom,
 }: FinishedScreenProps) {
   const isPending = pendingAction !== null;
+  const isRequestingRematch = pendingAction === "rematch";
 
   return (
     <GamePhaseLayout
@@ -145,6 +150,50 @@ export function FinishedScreen({
             {errorMessage}
           </p>
         )}
+
+        <section
+          className="game-sidebar-section finished-rematch"
+          aria-labelledby="finished-rematch-title"
+        >
+          <p className="card-label">Rejouer</p>
+          <h2 id="finished-rematch-title">Une nouvelle partie ?</h2>
+          {isHost ? (
+            <>
+              <p id="finished-rematch-description">
+                Retrouvez le même groupe dans le lobby et préparez une nouvelle
+                partie.
+              </p>
+              <button
+                className="button button--primary finished-rematch-button"
+                type="button"
+                onClick={onRequestRematch}
+                disabled={isPending}
+                aria-describedby="finished-rematch-description"
+              >
+                {isRequestingRematch
+                  ? "Préparation…"
+                  : "Proposer une revanche"}
+              </button>
+              {isRequestingRematch && (
+                <p
+                  className="visually-hidden"
+                  role="status"
+                  aria-live="polite"
+                >
+                  Préparation de la revanche en cours.
+                </p>
+              )}
+            </>
+          ) : (
+            <p
+              className="form-message form-message--info"
+              role="status"
+              aria-live="polite"
+            >
+              L’hôte peut proposer une revanche.
+            </p>
+          )}
+        </section>
 
         <GameLeaveAction
           id="finished-leave-note"

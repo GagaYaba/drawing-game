@@ -17,6 +17,7 @@ const DRAWER: InternalPlayer = {
 
 function createGame(prompt: DrawingPrompt): InternalGame {
   return {
+    gameId: "game-1",
     phase: "DRAWING",
     totalRounds: TOTAL_ROUNDS,
     currentRound: 1,
@@ -35,6 +36,7 @@ function createGame(prompt: DrawingPrompt): InternalGame {
     },
     usedPromptIds: [prompt.id],
     usedTurnIds: ["turn-1"],
+    finishedState: null,
     startedAt: 2_000,
     phaseEndsAt: null,
   };

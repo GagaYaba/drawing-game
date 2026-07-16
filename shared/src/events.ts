@@ -8,6 +8,7 @@ export const SOCKET_EVENTS = {
   PLAYER_SET_READY: "player:set-ready",
   GAME_START: "game:start",
   GAME_CONTINUE: "game:continue",
+  GAME_REQUEST_REMATCH: "game:request-rematch",
   DRAWING_SUBMIT: "drawing:submit",
   GUESS_SUBMIT: "guess:submit",
   TURN_SECRET: "turn:secret",

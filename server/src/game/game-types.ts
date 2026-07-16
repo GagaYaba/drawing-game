@@ -2,6 +2,7 @@ import type {
   DrawingDocument,
   GamePhase,
   GuessValue,
+  PublicFinishedState,
   PublicGamePrompt,
   PublicRoomState,
   SubmitGuessSuccessData,
@@ -50,6 +51,7 @@ export interface InternalTurn {
 }
 
 export interface InternalGame {
+  gameId: string;
   phase: Exclude<GamePhase, "LOBBY">;
   totalRounds: number;
   currentRound: number;
@@ -58,11 +60,13 @@ export interface InternalGame {
   currentTurn: InternalTurn;
   usedPromptIds: string[];
   usedTurnIds: string[];
+  finishedState: PublicFinishedState | null;
   startedAt: number;
   phaseEndsAt: number | null;
 }
 
 export type GameClock = () => number;
+export type GameIdGenerator = () => string;
 export type TurnIdGenerator = () => string;
 export type PlayerOrderShuffler = (playerIds: readonly string[]) => string[];
 export type DrawingPromptSelector = (
@@ -77,6 +81,7 @@ export type GameTimerClearer = (handle: unknown) => void;
 
 export interface GameManagerOptions {
   clock?: GameClock;
+  generateGameId?: GameIdGenerator;
   generateTurnId?: TurnIdGenerator;
   introDurationMs?: number;
   prompts?: readonly DrawingPrompt[];
@@ -103,6 +108,10 @@ export interface ContinueGameInternalResult {
     drawerSocketId: string;
     secret: TurnSecretPayload;
   };
+}
+
+export interface RequestRematchInternalResult {
+  room: PublicRoomState;
 }
 
 export interface SubmitDrawingInternalResult {

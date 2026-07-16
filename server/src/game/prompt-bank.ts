@@ -4,7 +4,7 @@ export const DRAWING_PROMPTS = [
   {
     id: "octopus-elegance",
     statement:
-      "Représente une pieuvre de la plus élégante (10) à la moins élégante (1).",
+      "Représente une pieuvre de la moins élégante à la plus élégante.",
     lowLabel: "Moins élégante",
     highLabel: "Plus élégante",
     category: "élégance",
@@ -12,7 +12,7 @@ export const DRAWING_PROMPTS = [
   {
     id: "cabin-comfort",
     statement:
-      "Représente une cabane de la plus confortable (10) à la moins confortable (1).",
+      "Représente une cabane de la moins confortable à la plus confortable.",
     lowLabel: "Moins confortable",
     highLabel: "Plus confortable",
     category: "confort",
@@ -20,7 +20,7 @@ export const DRAWING_PROMPTS = [
   {
     id: "dragon-power",
     statement:
-      "Représente un dragon du plus puissant (10) au moins puissant (1).",
+      "Représente un dragon du moins puissant au plus puissant.",
     lowLabel: "Moins puissant",
     highLabel: "Plus puissant",
     category: "puissance",
@@ -28,7 +28,7 @@ export const DRAWING_PROMPTS = [
   {
     id: "penguin-suspicion",
     statement:
-      "Représente un pingouin du plus suspect (10) au moins suspect (1).",
+      "Représente un pingouin du moins suspect au plus suspect.",
     lowLabel: "Moins suspect",
     highLabel: "Plus suspect",
     category: "suspicion",
@@ -36,7 +36,7 @@ export const DRAWING_PROMPTS = [
   {
     id: "train-speed",
     statement:
-      "Représente un train du plus rapide (10) au moins rapide (1).",
+      "Représente un train du moins rapide au plus rapide.",
     lowLabel: "Moins rapide",
     highLabel: "Plus rapide",
     category: "vitesse",
@@ -44,7 +44,7 @@ export const DRAWING_PROMPTS = [
   {
     id: "sandwich-appetite",
     statement:
-      "Représente un sandwich du plus appétissant (10) au moins appétissant (1).",
+      "Représente un sandwich du moins appétissant au plus appétissant.",
     lowLabel: "Moins appétissant",
     highLabel: "Plus appétissant",
     category: "appétit",
@@ -52,7 +52,7 @@ export const DRAWING_PROMPTS = [
   {
     id: "lamp-modernity",
     statement:
-      "Représente une lampe de la plus moderne (10) à la moins moderne (1).",
+      "Représente une lampe de la moins moderne à la plus moderne.",
     lowLabel: "Moins moderne",
     highLabel: "Plus moderne",
     category: "modernité",
@@ -60,7 +60,7 @@ export const DRAWING_PROMPTS = [
   {
     id: "witch-kindness",
     statement:
-      "Représente une sorcière de la plus gentille (10) à la moins gentille (1).",
+      "Représente une sorcière de la moins gentille à la plus gentille.",
     lowLabel: "Moins gentille",
     highLabel: "Plus gentille",
     category: "gentillesse",
@@ -68,7 +68,7 @@ export const DRAWING_PROMPTS = [
   {
     id: "island-danger",
     statement:
-      "Représente une île de la plus dangereuse (10) à la moins dangereuse (1).",
+      "Représente une île de la moins dangereuse à la plus dangereuse.",
     lowLabel: "Moins dangereuse",
     highLabel: "Plus dangereuse",
     category: "danger",
@@ -76,7 +76,7 @@ export const DRAWING_PROMPTS = [
   {
     id: "slipper-luxury",
     statement:
-      "Représente une pantoufle de la plus luxueuse (10) à la moins luxueuse (1).",
+      "Représente une pantoufle de la moins luxueuse à la plus luxueuse.",
     lowLabel: "Moins luxueuse",
     highLabel: "Plus luxueuse",
     category: "luxe",
@@ -84,7 +84,7 @@ export const DRAWING_PROMPTS = [
   {
     id: "alien-strangeness",
     statement:
-      "Représente un extraterrestre du plus étrange (10) au moins étrange (1).",
+      "Représente un extraterrestre du moins étrange au plus étrange.",
     lowLabel: "Moins étrange",
     highLabel: "Plus étrange",
     category: "étrangeté",
@@ -92,7 +92,7 @@ export const DRAWING_PROMPTS = [
   {
     id: "vampire-fear",
     statement:
-      "Représente un vampire du plus effrayant (10) au moins effrayant (1).",
+      "Représente un vampire du moins effrayant au plus effrayant.",
     lowLabel: "Moins effrayant",
     highLabel: "Plus effrayant",
     category: "peur",
@@ -100,7 +100,7 @@ export const DRAWING_PROMPTS = [
   {
     id: "duck-humour",
     statement:
-      "Représente un canard du plus drôle (10) au moins drôle (1).",
+      "Représente un canard du moins drôle au plus drôle.",
     lowLabel: "Moins drôle",
     highLabel: "Plus drôle",
     category: "humour",
@@ -108,7 +108,7 @@ export const DRAWING_PROMPTS = [
   {
     id: "cloud-sadness",
     statement:
-      "Représente un nuage du plus triste (10) au moins triste (1).",
+      "Représente un nuage du moins triste au plus triste.",
     lowLabel: "Moins triste",
     highLabel: "Plus triste",
     category: "tristesse",
@@ -116,7 +116,7 @@ export const DRAWING_PROMPTS = [
   {
     id: "bicycle-intelligence",
     statement:
-      "Représente un vélo du plus intelligent (10) au moins intelligent (1).",
+      "Représente un vélo du moins intelligent au plus intelligent.",
     lowLabel: "Moins intelligent",
     highLabel: "Plus intelligent",
     category: "intelligence",
@@ -124,7 +124,7 @@ export const DRAWING_PROMPTS = [
   {
     id: "crown-elegance",
     statement:
-      "Représente une couronne de la plus élégante (10) à la moins élégante (1).",
+      "Représente une couronne de la moins élégante à la plus élégante.",
     lowLabel: "Moins élégante",
     highLabel: "Plus élégante",
     category: "élégance",
@@ -132,7 +132,7 @@ export const DRAWING_PROMPTS = [
   {
     id: "sofa-comfort",
     statement:
-      "Représente un canapé du plus confortable (10) au moins confortable (1).",
+      "Représente un canapé du moins confortable au plus confortable.",
     lowLabel: "Moins confortable",
     highLabel: "Plus confortable",
     category: "confort",
@@ -140,7 +140,7 @@ export const DRAWING_PROMPTS = [
   {
     id: "hamster-power",
     statement:
-      "Représente un hamster du plus puissant (10) au moins puissant (1).",
+      "Représente un hamster du moins puissant au plus puissant.",
     lowLabel: "Moins puissant",
     highLabel: "Plus puissant",
     category: "puissance",
@@ -148,7 +148,7 @@ export const DRAWING_PROMPTS = [
   {
     id: "detective-suspicion",
     statement:
-      "Représente un détective du plus suspect (10) au moins suspect (1).",
+      "Représente un détective du moins suspect au plus suspect.",
     lowLabel: "Moins suspect",
     highLabel: "Plus suspect",
     category: "suspicion",
@@ -156,7 +156,7 @@ export const DRAWING_PROMPTS = [
   {
     id: "rocket-speed",
     statement:
-      "Représente une fusée de la plus rapide (10) à la moins rapide (1).",
+      "Représente une fusée de la moins rapide à la plus rapide.",
     lowLabel: "Moins rapide",
     highLabel: "Plus rapide",
     category: "vitesse",
@@ -164,7 +164,7 @@ export const DRAWING_PROMPTS = [
   {
     id: "soup-appetite",
     statement:
-      "Représente une soupe de la plus appétissante (10) à la moins appétissante (1).",
+      "Représente une soupe de la moins appétissante à la plus appétissante.",
     lowLabel: "Moins appétissante",
     highLabel: "Plus appétissante",
     category: "appétit",
@@ -172,7 +172,7 @@ export const DRAWING_PROMPTS = [
   {
     id: "school-modernity",
     statement:
-      "Représente une école de la plus moderne (10) à la moins moderne (1).",
+      "Représente une école de la moins moderne à la plus moderne.",
     lowLabel: "Moins moderne",
     highLabel: "Plus moderne",
     category: "modernité",
@@ -180,7 +180,7 @@ export const DRAWING_PROMPTS = [
   {
     id: "goblin-cuteness",
     statement:
-      "Représente un gobelin du plus mignon (10) au moins mignon (1).",
+      "Représente un gobelin du moins mignon au plus mignon.",
     lowLabel: "Moins mignon",
     highLabel: "Plus mignon",
     category: "mignonnerie",
@@ -188,7 +188,7 @@ export const DRAWING_PROMPTS = [
   {
     id: "bridge-danger",
     statement:
-      "Représente un pont du plus dangereux (10) au moins dangereux (1).",
+      "Représente un pont du moins dangereux au plus dangereux.",
     lowLabel: "Moins dangereux",
     highLabel: "Plus dangereux",
     category: "danger",
@@ -196,7 +196,7 @@ export const DRAWING_PROMPTS = [
   {
     id: "tent-luxury",
     statement:
-      "Représente une tente de la plus luxueuse (10) à la moins luxueuse (1).",
+      "Représente une tente de la moins luxueuse à la plus luxueuse.",
     lowLabel: "Moins luxueuse",
     highLabel: "Plus luxueuse",
     category: "luxe",
@@ -204,7 +204,7 @@ export const DRAWING_PROMPTS = [
   {
     id: "fish-strangeness",
     statement:
-      "Représente un poisson du plus étrange (10) au moins étrange (1).",
+      "Représente un poisson du moins étrange au plus étrange.",
     lowLabel: "Moins étrange",
     highLabel: "Plus étrange",
     category: "étrangeté",
@@ -212,7 +212,7 @@ export const DRAWING_PROMPTS = [
   {
     id: "scarecrow-fear",
     statement:
-      "Représente un épouvantail du plus effrayant (10) au moins effrayant (1).",
+      "Représente un épouvantail du moins effrayant au plus effrayant.",
     lowLabel: "Moins effrayant",
     highLabel: "Plus effrayant",
     category: "peur",
@@ -220,7 +220,7 @@ export const DRAWING_PROMPTS = [
   {
     id: "king-humour",
     statement:
-      "Représente un roi du plus drôle (10) au moins drôle (1).",
+      "Représente un roi du moins drôle au plus drôle.",
     lowLabel: "Moins drôle",
     highLabel: "Plus drôle",
     category: "humour",
@@ -228,7 +228,7 @@ export const DRAWING_PROMPTS = [
   {
     id: "sun-sadness",
     statement:
-      "Représente un soleil du plus triste (10) au moins triste (1).",
+      "Représente un soleil du moins triste au plus triste.",
     lowLabel: "Moins triste",
     highLabel: "Plus triste",
     category: "tristesse",
@@ -236,7 +236,7 @@ export const DRAWING_PROMPTS = [
   {
     id: "backpack-intelligence",
     statement:
-      "Représente un sac à dos du plus intelligent (10) au moins intelligent (1).",
+      "Représente un sac à dos du moins intelligent au plus intelligent.",
     lowLabel: "Moins intelligent",
     highLabel: "Plus intelligent",
     category: "intelligence",
@@ -244,7 +244,7 @@ export const DRAWING_PROMPTS = [
   {
     id: "whale-elegance",
     statement:
-      "Représente une baleine de la plus élégante (10) à la moins élégante (1).",
+      "Représente une baleine de la moins élégante à la plus élégante.",
     lowLabel: "Moins élégante",
     highLabel: "Plus élégante",
     category: "élégance",
@@ -252,7 +252,7 @@ export const DRAWING_PROMPTS = [
   {
     id: "spaceship-comfort",
     statement:
-      "Représente un vaisseau spatial du plus confortable (10) au moins confortable (1).",
+      "Représente un vaisseau spatial du moins confortable au plus confortable.",
     lowLabel: "Moins confortable",
     highLabel: "Plus confortable",
     category: "confort",
@@ -260,7 +260,7 @@ export const DRAWING_PROMPTS = [
   {
     id: "fairy-power",
     statement:
-      "Représente une fée de la plus puissante (10) à la moins puissante (1).",
+      "Représente une fée de la moins puissante à la plus puissante.",
     lowLabel: "Moins puissante",
     highLabel: "Plus puissante",
     category: "puissance",
@@ -268,7 +268,7 @@ export const DRAWING_PROMPTS = [
   {
     id: "neighbor-suspicion",
     statement:
-      "Représente un voisin du plus suspect (10) au moins suspect (1).",
+      "Représente un voisin du moins suspect au plus suspect.",
     lowLabel: "Moins suspect",
     highLabel: "Plus suspect",
     category: "suspicion",
@@ -276,7 +276,7 @@ export const DRAWING_PROMPTS = [
   {
     id: "snail-speed",
     statement:
-      "Représente un escargot du plus rapide (10) au moins rapide (1).",
+      "Représente un escargot du moins rapide au plus rapide.",
     lowLabel: "Moins rapide",
     highLabel: "Plus rapide",
     category: "vitesse",
@@ -284,7 +284,7 @@ export const DRAWING_PROMPTS = [
   {
     id: "planet-appetite",
     statement:
-      "Représente une planète de la plus appétissante (10) à la moins appétissante (1).",
+      "Représente une planète de la moins appétissante à la plus appétissante.",
     lowLabel: "Moins appétissante",
     highLabel: "Plus appétissante",
     category: "appétit",

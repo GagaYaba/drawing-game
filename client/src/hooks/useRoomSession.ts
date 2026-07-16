@@ -4,6 +4,7 @@ import {
   SOCKET_EVENTS,
   type DrawingDocument,
   type GameCancelledPayload,
+  type GamePhase,
   type GuessValue,
   type PublicRoomState,
   type SubmitGuessPayload,
@@ -18,6 +19,7 @@ export interface ClientRoomSession {
 }
 
 export interface ClientGameSecrets {
+  gameId: string | null;
   turnId: string | null;
   secretLevel: GuessValue | null;
 }
@@ -40,6 +42,7 @@ export type PendingRoomAction =
   | "ready"
   | "start"
   | "continue"
+  | "rematch"
   | "submitDrawing"
   | "leave"
   | null;
@@ -50,6 +53,7 @@ const EMPTY_SESSION: ClientRoomSession = {
 };
 
 const EMPTY_GAME_SECRETS: ClientGameSecrets = {
+  gameId: null,
   turnId: null,
   secretLevel: null,
 };
@@ -62,6 +66,8 @@ const EMPTY_GUESS_STATE: ClientGuessState = {
 };
 
 const ACTION_TIMEOUT_MS = 8_000;
+const REMATCH_READY_NOTICE =
+  "La revanche est prête. Indiquez lorsque vous êtes prêt à jouer.";
 
 function getInitialRoomCode() {
   const roomCode = new URLSearchParams(window.location.search).get("room");
@@ -97,10 +103,53 @@ export function didPublicTurnChange(
   return previousTurnId !== nextTurnId;
 }
 
+export function didPublicGameChange(
+  previousGameId: string | null,
+  nextGameId: string | null,
+) {
+  return previousGameId !== nextGameId;
+}
+
+export interface ClientGameActionContext {
+  roomCode: string;
+  gameId: string;
+  turnId: string;
+  phase: GamePhase;
+}
+
+export function getPublicGameActionContext(
+  room: PublicRoomState | null,
+): ClientGameActionContext | null {
+  if (room === null || room.game === null) {
+    return null;
+  }
+
+  return {
+    roomCode: room.code,
+    gameId: room.game.gameId,
+    turnId: room.game.turnId,
+    phase: room.game.phase,
+  };
+}
+
+export function isGameActionContextCurrent(
+  expected: ClientGameActionContext,
+  current: ClientGameActionContext | null,
+) {
+  return (
+    current !== null &&
+    expected.roomCode === current.roomCode &&
+    expected.gameId === current.gameId &&
+    expected.turnId === current.turnId &&
+    expected.phase === current.phase
+  );
+}
+
 export function isTurnSecretForActiveDrawer(
   payload: TurnSecretPayload,
   context: {
     roomCode: string | null;
+    gameId: string | null;
     turnId: string | null;
     playerId: string | null;
   },
@@ -108,8 +157,10 @@ export function isTurnSecretForActiveDrawer(
   return (
     context.playerId !== null &&
     context.roomCode !== null &&
+    context.gameId !== null &&
     context.turnId !== null &&
     payload.roomCode === context.roomCode &&
+    payload.gameId === context.gameId &&
     payload.turnId === context.turnId &&
     payload.drawerPlayerId === context.playerId &&
     Number.isInteger(payload.secretLevel) &&
@@ -131,7 +182,9 @@ export function useRoomSession() {
   const [session, setSession] = useState<ClientRoomSession>(EMPTY_SESSION);
   const currentPlayerIdRef = useRef<string | null>(null);
   const currentRoomCodeRef = useRef<string | null>(null);
+  const currentGameIdRef = useRef<string | null>(null);
   const currentTurnIdRef = useRef<string | null>(null);
+  const currentGamePhaseRef = useRef<GamePhase | null>(null);
   const [gameSecrets, setGameSecrets] =
     useState<ClientGameSecrets>(EMPTY_GAME_SECRETS);
   const [guessState, setGuessState] =
@@ -164,96 +217,171 @@ export function useRoomSession() {
     updateGuessState(EMPTY_GUESS_STATE);
   };
 
+  const updatePendingAction = (action: PendingRoomAction) => {
+    pendingActionRef.current = action;
+    setPendingAction(action);
+  };
+
+  const clearPendingAction = (invalidateAcknowledgement = false) => {
+    if (invalidateAcknowledgement) {
+      actionTokenRef.current += 1;
+    }
+
+    updatePendingAction(null);
+  };
+
+  const beginAction = (action: Exclude<PendingRoomAction, null>) => {
+    actionTokenRef.current += 1;
+    updatePendingAction(action);
+    return actionTokenRef.current;
+  };
+
+  const clearTrackedGameContext = () => {
+    currentGameIdRef.current = null;
+    currentTurnIdRef.current = null;
+    currentGamePhaseRef.current = null;
+  };
+
+  const clearTrackedSessionContext = () => {
+    currentPlayerIdRef.current = null;
+    currentRoomCodeRef.current = null;
+    clearTrackedGameContext();
+  };
+
+  const syncTrackedRoomContext = (room: PublicRoomState) => {
+    currentRoomCodeRef.current = room.code;
+    currentGameIdRef.current = room.game?.gameId ?? null;
+    currentTurnIdRef.current = room.game?.turnId ?? null;
+    currentGamePhaseRef.current = room.game?.phase ?? null;
+  };
+
+  const getTrackedGameActionContext =
+    (): ClientGameActionContext | null => {
+      if (
+        currentRoomCodeRef.current === null ||
+        currentGameIdRef.current === null ||
+        currentTurnIdRef.current === null ||
+        currentGamePhaseRef.current === null
+      ) {
+        return null;
+      }
+
+      return {
+        roomCode: currentRoomCodeRef.current,
+        gameId: currentGameIdRef.current,
+        turnId: currentTurnIdRef.current,
+        phase: currentGamePhaseRef.current,
+      };
+    };
+
+  const applyRoomState = (room: PublicRoomState) => {
+    const currentPlayerId = currentPlayerIdRef.current;
+
+    if (currentPlayerId === null) {
+      return;
+    }
+
+    const currentPlayerIsPresent = room.players.some(
+      (player) => player.id === currentPlayerId,
+    );
+
+    if (!currentPlayerIsPresent) {
+      clearTrackedSessionContext();
+      clearPendingAction(true);
+      setGameSecrets(EMPTY_GAME_SECRETS);
+      resetGuessState();
+      setNoticeMessage(null);
+      setErrorMessage(
+        "Vous ne faites plus partie de ce salon. Vous pouvez en rejoindre un autre.",
+      );
+      setSession(EMPTY_SESSION);
+      return;
+    }
+
+    const previousGameId = currentGameIdRef.current;
+    const previousTurnId = currentTurnIdRef.current;
+    const previousPhase = currentGamePhaseRef.current;
+    const nextGame = room.game;
+    const nextGameId = nextGame?.gameId ?? null;
+    const nextTurnId = nextGame?.turnId ?? null;
+    const nextPhase = nextGame?.phase ?? null;
+    const gameChanged = didPublicGameChange(
+      previousGameId,
+      nextGameId,
+    );
+    const turnChanged = didPublicTurnChange(
+      previousTurnId,
+      nextTurnId,
+    );
+    const returnedToLobbyAfterFinished =
+      previousGameId !== null &&
+      previousPhase === "FINISHED" &&
+      nextGame === null;
+
+    syncTrackedRoomContext(room);
+
+    const currentPendingAction = pendingActionRef.current;
+    const pendingContextEnded =
+      ((currentPendingAction === "ready" ||
+        currentPendingAction === "start") &&
+        nextGame !== null) ||
+      (currentPendingAction === "submitDrawing" &&
+        (gameChanged ||
+          turnChanged ||
+          nextPhase !== "DRAWING")) ||
+      (currentPendingAction === "continue" &&
+        (gameChanged ||
+          turnChanged ||
+          nextPhase !== "REVEAL")) ||
+      (currentPendingAction === "rematch" &&
+        (gameChanged || nextPhase !== "FINISHED"));
+
+    if (pendingContextEnded) {
+      clearPendingAction(true);
+    }
+
+    if (
+      gameChanged ||
+      turnChanged ||
+      nextGame === null ||
+      nextGame.currentDrawer.id !== currentPlayerId ||
+      nextGame.phase === "REVEAL" ||
+      nextGame.phase === "FINISHED"
+    ) {
+      setGameSecrets(EMPTY_GAME_SECRETS);
+    }
+
+    const shouldKeepGuessState =
+      !gameChanged &&
+      !turnChanged &&
+      nextGame !== null &&
+      nextGame.phase === "VOTING" &&
+      nextGame.currentDrawer.id !== currentPlayerId;
+
+    if (!shouldKeepGuessState) {
+      resetGuessState();
+    }
+
+    if (returnedToLobbyAfterFinished) {
+      setErrorMessage(null);
+      setNoticeMessage(REMATCH_READY_NOTICE);
+    } else if (nextGame !== null) {
+      setNoticeMessage(null);
+      setErrorMessage(null);
+    }
+
+    setSession({ currentPlayerId, room });
+  };
+
   useEffect(() => {
     const handleRoomState = (room: PublicRoomState) => {
-      const currentPlayerId = currentPlayerIdRef.current;
-
-      if (currentPlayerId === null) {
-        return;
-      }
-
-      const currentPlayerIsPresent = room.players.some(
-        (player) => player.id === currentPlayerId,
-      );
-
-      if (!currentPlayerIsPresent) {
-        currentPlayerIdRef.current = null;
-        currentRoomCodeRef.current = null;
-        currentTurnIdRef.current = null;
-        pendingActionRef.current = null;
-        actionTokenRef.current += 1;
-        setPendingAction(null);
-        setGameSecrets(EMPTY_GAME_SECRETS);
-        resetGuessState();
-        setNoticeMessage(null);
-        setErrorMessage(
-          "Vous ne faites plus partie de ce salon. Vous pouvez en rejoindre un autre.",
-        );
-        setSession(EMPTY_SESSION);
-        return;
-      }
-
-      currentRoomCodeRef.current = room.code;
-      const nextTurnId = room.game?.turnId ?? null;
-      const turnChanged = didPublicTurnChange(
-        currentTurnIdRef.current,
-        nextTurnId,
-      );
-      currentTurnIdRef.current = nextTurnId;
-
-      if (turnChanged) {
-        setGameSecrets(EMPTY_GAME_SECRETS);
-        resetGuessState();
-      }
-
-      if (
-        pendingActionRef.current === "submitDrawing" &&
-        room.game?.phase !== "DRAWING"
-      ) {
-        pendingActionRef.current = null;
-        actionTokenRef.current += 1;
-        setPendingAction(null);
-      }
-
-      if (
-        pendingActionRef.current === "continue" &&
-        (turnChanged || room.game?.phase === "FINISHED")
-      ) {
-        pendingActionRef.current = null;
-        actionTokenRef.current += 1;
-        setPendingAction(null);
-      }
-
-      if (
-        turnChanged ||
-        room.game === null ||
-        room.game.currentDrawer.id !== currentPlayerId ||
-        room.game.phase === "REVEAL" ||
-        room.game.phase === "FINISHED"
-      ) {
-        setGameSecrets(EMPTY_GAME_SECRETS);
-      }
-
-      const shouldKeepGuessState =
-        room.game !== null &&
-        (room.game.phase === "VOTING" || room.game.phase === "REVEAL") &&
-        room.game.currentDrawer.id !== currentPlayerId;
-
-      if (!turnChanged && !shouldKeepGuessState) {
-        resetGuessState();
-      }
-
-      if (room.game !== null) {
-        setNoticeMessage(null);
-        setErrorMessage(null);
-      }
-
-      setSession({ currentPlayerId, room });
+      applyRoomState(room);
     };
 
     const handleTurnSecret = (payload: TurnSecretPayload) => {
       if (!isTurnSecretForActiveDrawer(payload, {
         roomCode: currentRoomCodeRef.current,
+        gameId: currentGameIdRef.current,
         turnId: currentTurnIdRef.current,
         playerId: currentPlayerIdRef.current,
       })) {
@@ -261,6 +389,7 @@ export function useRoomSession() {
       }
 
       setGameSecrets({
+        gameId: payload.gameId,
         turnId: payload.turnId,
         secretLevel: payload.secretLevel as GuessValue,
       });
@@ -274,19 +403,14 @@ export function useRoomSession() {
         return;
       }
 
-      currentTurnIdRef.current = null;
+      clearTrackedGameContext();
       setGameSecrets(EMPTY_GAME_SECRETS);
       resetGuessState();
       setErrorMessage(null);
       setNoticeMessage(payload.message);
 
-      if (
-        pendingActionRef.current === "submitDrawing" ||
-        pendingActionRef.current === "continue"
-      ) {
-        pendingActionRef.current = null;
-        actionTokenRef.current += 1;
-        setPendingAction(null);
+      if (pendingActionRef.current !== null) {
+        clearPendingAction(true);
       }
     };
 
@@ -298,12 +422,8 @@ export function useRoomSession() {
         return;
       }
 
-      currentPlayerIdRef.current = null;
-      currentRoomCodeRef.current = null;
-      currentTurnIdRef.current = null;
-      pendingActionRef.current = null;
-      actionTokenRef.current += 1;
-      setPendingAction(null);
+      clearTrackedSessionContext();
+      clearPendingAction(true);
       setGameSecrets(EMPTY_GAME_SECRETS);
       resetGuessState();
       setNoticeMessage(null);
@@ -328,27 +448,13 @@ export function useRoomSession() {
     };
   }, []);
 
-  const updatePendingAction = (action: PendingRoomAction) => {
-    pendingActionRef.current = action;
-    setPendingAction(action);
-  };
-
-  const beginAction = (action: Exclude<PendingRoomAction, null>) => {
-    actionTokenRef.current += 1;
-    updatePendingAction(action);
-    return actionTokenRef.current;
-  };
-
   const resetAfterUncertainAction = (actionToken: number) => {
     if (actionToken !== actionTokenRef.current) {
       return;
     }
 
-    actionTokenRef.current += 1;
-    currentPlayerIdRef.current = null;
-    currentRoomCodeRef.current = null;
-    currentTurnIdRef.current = null;
-    updatePendingAction(null);
+    clearTrackedSessionContext();
+    clearPendingAction(true);
     setGameSecrets(EMPTY_GAME_SECRETS);
     resetGuessState();
     setNoticeMessage(null);
@@ -391,7 +497,7 @@ export function useRoomSession() {
     setErrorMessage(null);
     setNoticeMessage(null);
     setGameSecrets(EMPTY_GAME_SECRETS);
-    currentTurnIdRef.current = null;
+    clearTrackedGameContext();
     resetGuessState();
     const actionToken = beginAction("create");
 
@@ -417,11 +523,7 @@ export function useRoomSession() {
 
         setRoomCode(result.data.roomCode);
         currentPlayerIdRef.current = result.data.playerId;
-        currentRoomCodeRef.current = result.data.roomCode;
-        setSession({
-          currentPlayerId: result.data.playerId,
-          room: result.data.room,
-        });
+        applyRoomState(result.data.room);
       },
     );
   };
@@ -446,7 +548,7 @@ export function useRoomSession() {
     setErrorMessage(null);
     setNoticeMessage(null);
     setGameSecrets(EMPTY_GAME_SECRETS);
-    currentTurnIdRef.current = null;
+    clearTrackedGameContext();
     resetGuessState();
     const actionToken = beginAction("join");
 
@@ -472,11 +574,7 @@ export function useRoomSession() {
 
         setRoomCode(result.data.roomCode);
         currentPlayerIdRef.current = result.data.playerId;
-        currentRoomCodeRef.current = result.data.roomCode;
-        setSession({
-          currentPlayerId: result.data.playerId,
-          room: result.data.room,
-        });
+        applyRoomState(result.data.room);
       },
     );
   };
@@ -513,13 +611,7 @@ export function useRoomSession() {
           return;
         }
 
-        setSession((currentSession) => ({
-          currentPlayerId: currentSession.currentPlayerId,
-          room:
-            currentSession.currentPlayerId === null
-              ? currentSession.room
-              : result.data,
-        }));
+        applyRoomState(result.data);
       },
     );
   };
@@ -557,13 +649,7 @@ export function useRoomSession() {
           return;
         }
 
-        setSession((currentSession) => ({
-          currentPlayerId: currentSession.currentPlayerId,
-          room:
-            currentSession.currentPlayerId === null
-              ? currentSession.room
-              : result.data.room,
-        }));
+        applyRoomState(result.data.room);
       },
     );
   };
@@ -594,6 +680,12 @@ export function useRoomSession() {
       return false;
     }
 
+    const actionContext = getPublicGameActionContext(session.room);
+    if (actionContext === null) {
+      setErrorMessage("Le contexte de la partie est indisponible.");
+      return false;
+    }
+
     setErrorMessage(null);
     setNoticeMessage(null);
     const actionToken = beginAction("continue");
@@ -601,7 +693,13 @@ export function useRoomSession() {
     socket.timeout(ACTION_TIMEOUT_MS).emit(
       SOCKET_EVENTS.GAME_CONTINUE,
       (timeoutError, result) => {
-        if (actionToken !== actionTokenRef.current) {
+        if (
+          actionToken !== actionTokenRef.current ||
+          !isGameActionContextCurrent(
+            actionContext,
+            getTrackedGameActionContext(),
+          )
+        ) {
           return;
         }
 
@@ -620,27 +718,80 @@ export function useRoomSession() {
           return;
         }
 
-        const nextGame = result.data.room.game;
-        const nextTurnId = nextGame?.turnId ?? null;
-        const turnChanged = didPublicTurnChange(
-          currentTurnIdRef.current,
-          nextTurnId,
-        );
-        currentTurnIdRef.current = nextTurnId;
+        updatePendingAction(null);
+        applyRoomState(result.data.room);
+      },
+    );
 
-        if (turnChanged || nextGame?.phase === "FINISHED") {
-          setGameSecrets(EMPTY_GAME_SECRETS);
-          resetGuessState();
+    return true;
+  };
+
+  const requestRematch = () => {
+    if (
+      pendingActionRef.current !== null ||
+      session.room === null ||
+      !ensureSocketIsConnected()
+    ) {
+      return false;
+    }
+
+    const game = session.room.game;
+    const currentPlayer = session.room.players.find(
+      (player) => player.id === session.currentPlayerId,
+    );
+
+    if (game === null || game.phase !== "FINISHED") {
+      setErrorMessage(
+        "Une revanche ne peut être proposée qu’après la fin de la partie.",
+      );
+      return false;
+    }
+
+    if (currentPlayer === undefined || !currentPlayer.isHost) {
+      setErrorMessage("Seul l’hôte peut proposer une revanche.");
+      return false;
+    }
+
+    const actionContext = getPublicGameActionContext(session.room);
+    if (actionContext === null) {
+      setErrorMessage("Le contexte de la partie est indisponible.");
+      return false;
+    }
+
+    setErrorMessage(null);
+    setNoticeMessage(null);
+    const actionToken = beginAction("rematch");
+
+    socket.timeout(ACTION_TIMEOUT_MS).emit(
+      SOCKET_EVENTS.GAME_REQUEST_REMATCH,
+      (timeoutError, result) => {
+        if (
+          actionToken !== actionTokenRef.current ||
+          !isGameActionContextCurrent(
+            actionContext,
+            getTrackedGameActionContext(),
+          )
+        ) {
+          return;
+        }
+
+        if (timeoutError) {
+          actionTokenRef.current += 1;
+          updatePendingAction(null);
+          setErrorMessage(
+            "La réponse du serveur a expiré. Attendez la synchronisation du salon avant de reproposer une revanche.",
+          );
+          return;
+        }
+
+        if (!result.success) {
+          updatePendingAction(null);
+          setErrorMessage(result.error.message);
+          return;
         }
 
         updatePendingAction(null);
-        setSession((currentSession) => ({
-          currentPlayerId: currentSession.currentPlayerId,
-          room:
-            currentSession.currentPlayerId === null
-              ? currentSession.room
-              : result.data.room,
-        }));
+        applyRoomState(result.data.room);
       },
     );
 
@@ -680,6 +831,12 @@ export function useRoomSession() {
       return false;
     }
 
+    const actionContext = getPublicGameActionContext(session.room);
+    if (actionContext === null) {
+      setErrorMessage("Le contexte du tour est indisponible.");
+      return false;
+    }
+
     setErrorMessage(null);
     setNoticeMessage(null);
     const actionToken = beginAction("submitDrawing");
@@ -688,7 +845,13 @@ export function useRoomSession() {
       SOCKET_EVENTS.DRAWING_SUBMIT,
       { drawing },
       (timeoutError, result) => {
-        if (actionToken !== actionTokenRef.current) {
+        if (
+          actionToken !== actionTokenRef.current ||
+          !isGameActionContextCurrent(
+            actionContext,
+            getTrackedGameActionContext(),
+          )
+        ) {
           return;
         }
 
@@ -791,6 +954,19 @@ export function useRoomSession() {
     }
 
     const selectedValue = currentGuessState.selected;
+    const actionContext =
+      session.room === null
+        ? null
+        : getPublicGameActionContext(session.room);
+    if (actionContext === null) {
+      updateGuessState((currentState) => ({
+        ...currentState,
+        isSubmitting: false,
+        error: "Le contexte du vote est indisponible.",
+      }));
+      return false;
+    }
+
     guessActionTokenRef.current += 1;
     const guessActionToken = guessActionTokenRef.current;
 
@@ -804,7 +980,13 @@ export function useRoomSession() {
       SOCKET_EVENTS.GUESS_SUBMIT,
       createSubmitGuessPayload(game.turnId, selectedValue),
       (timeoutError, result) => {
-        if (guessActionToken !== guessActionTokenRef.current) {
+        if (
+          guessActionToken !== guessActionTokenRef.current ||
+          !isGameActionContextCurrent(
+            actionContext,
+            getTrackedGameActionContext(),
+          )
+        ) {
           return;
         }
 
@@ -872,9 +1054,7 @@ export function useRoomSession() {
         }
 
         setErrorMessage(null);
-        currentPlayerIdRef.current = null;
-        currentRoomCodeRef.current = null;
-        currentTurnIdRef.current = null;
+        clearTrackedSessionContext();
         setGameSecrets(EMPTY_GAME_SECRETS);
         resetGuessState();
         setNoticeMessage(null);
@@ -899,6 +1079,7 @@ export function useRoomSession() {
     setReady,
     startGame,
     continueGame,
+    requestRematch,
     submitDrawing,
     selectGuess,
     submitGuess,

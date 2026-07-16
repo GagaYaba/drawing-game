@@ -6,6 +6,7 @@ import type {
   PublicGameState,
   PublicLeaderboardEntry,
   PublicRevealState,
+  PublicRoomState,
 } from "@drawing-game/shared";
 
 import type { RoomManager } from "../rooms/room-manager.js";
@@ -24,10 +25,12 @@ import {
 import type {
   DrawingPrompt,
   ContinueGameInternalResult,
+  GameIdGenerator,
   GameManagerOptions,
   InternalGame,
   InternalTurn,
   InternalTurnScoreResult,
+  RequestRematchInternalResult,
   StartGameInternalResult,
   SubmitDrawingInternalResult,
   SubmitGuessInternalResult,
@@ -88,6 +91,34 @@ function validateTurnId(turnId: string): void {
   }
 }
 
+export function createGameId(
+  generateGameId: GameIdGenerator = randomUUID,
+): string {
+  let gameId: unknown;
+
+  try {
+    gameId = generateGameId();
+  } catch {
+    throw new RoomManagerError(
+      "INTERNAL_ERROR",
+      "Impossible de générer un identifiant de partie.",
+    );
+  }
+
+  if (
+    typeof gameId !== "string" ||
+    gameId.length === 0 ||
+    gameId.trim() !== gameId
+  ) {
+    throw new RoomManagerError(
+      "INTERNAL_ERROR",
+      "Impossible de générer un identifiant de partie valide.",
+    );
+  }
+
+  return gameId;
+}
+
 function validatePlayerScore(player: InternalPlayer): void {
   if (!Number.isSafeInteger(player.score) || player.score < 0) {
     throw new RoomManagerError(
@@ -108,6 +139,21 @@ function cloneTurnScoreResult(
       ]),
     ),
     drawer: { ...result.drawer },
+  };
+}
+
+function clonePublicFinishedState(
+  finishedState: PublicFinishedState,
+): PublicFinishedState {
+  return {
+    leaderboard: finishedState.leaderboard.map((entry) => ({
+      rank: entry.rank,
+      player: { ...entry.player },
+      score: entry.score,
+    })),
+    winners: finishedState.winners.map((winner) => ({ ...winner })),
+    completedRounds: finishedState.completedRounds,
+    completedTurns: finishedState.completedTurns,
   };
 }
 
@@ -559,9 +605,17 @@ export function toPublicGameState(
   game: InternalGame,
   players: readonly InternalPlayer[],
 ): PublicGameState {
-  const drawer = players.find(
+  const activeDrawer = players.find(
     (player) => player.id === game.currentTurn.drawerPlayerId,
   );
+  const historicalDrawer =
+    game.phase === "FINISHED"
+      ? game.finishedState?.leaderboard.find(
+          (entry) =>
+            entry.player.id === game.currentTurn.drawerPlayerId,
+        )?.player
+      : undefined;
+  const drawer = activeDrawer ?? historicalDrawer;
 
   if (drawer === undefined) {
     throw new RoomManagerError(
@@ -586,8 +640,18 @@ export function toPublicGameState(
   }
 
   const eligibleVoterIds = getEligibleVoterIds(game, players);
+  if (
+    (game.phase === "FINISHED" && game.finishedState === null) ||
+    (game.phase !== "FINISHED" && game.finishedState !== null)
+  ) {
+    throw new RoomManagerError(
+      "INTERNAL_ERROR",
+      "L’état final interne de la partie est incohérent.",
+    );
+  }
 
   return {
+    gameId: game.gameId,
     phase: game.phase,
     turnId: game.currentTurn.turnId,
     totalRounds: game.totalRounds,
@@ -630,13 +694,16 @@ export function toPublicGameState(
         : null,
     finished:
       game.phase === "FINISHED"
-        ? createPublicFinishedState(game, players)
+        ? clonePublicFinishedState(
+            game.finishedState as PublicFinishedState,
+          )
         : null,
   };
 }
 
 export class GameManager {
   private readonly clock;
+  private readonly gameIdGenerator;
   private readonly createTurnId;
   private readonly introDurationMs;
   private readonly prompts: readonly DrawingPrompt[];
@@ -653,6 +720,7 @@ export class GameManager {
     options: GameManagerOptions = {},
   ) {
     this.clock = options.clock ?? Date.now;
+    this.gameIdGenerator = options.generateGameId ?? randomUUID;
     this.createTurnId = options.generateTurnId ?? randomUUID;
     this.introDurationMs =
       options.introDurationMs ?? ROUND_INTRO_DURATION_MS;
@@ -764,6 +832,7 @@ export class GameManager {
     }
 
     const currentTurn = this.prepareTurn(drawer.id, [], []);
+    const gameId = createGameId(this.gameIdGenerator);
     const startedAt = this.clock();
     if (!Number.isFinite(startedAt)) {
       throw new RoomManagerError(
@@ -778,6 +847,7 @@ export class GameManager {
     }
 
     const game: InternalGame = {
+      gameId,
       phase: "ROUND_INTRO",
       totalRounds: TOTAL_ROUNDS,
       currentRound: 1,
@@ -786,6 +856,7 @@ export class GameManager {
       currentTurn,
       usedPromptIds: [currentTurn.prompt.id],
       usedTurnIds: [currentTurn.turnId],
+      finishedState: null,
       startedAt,
       phaseEndsAt: startedAt + this.introDurationMs,
     };
@@ -801,6 +872,7 @@ export class GameManager {
         drawerSocketId: drawer.socketId,
         secret: {
           roomCode: room.code,
+          gameId,
           turnId: currentTurn.turnId,
           drawerPlayerId: drawer.id,
           secretLevel: currentTurn.secretLevel,
@@ -1125,10 +1197,13 @@ export class GameManager {
 
     const nextPosition = getNextTurnPosition(game);
     if (nextPosition === null) {
+      const finishedState = createPublicFinishedState(game, room.players);
       const previousPhase = game.phase;
       const previousPhaseEndsAt = game.phaseEndsAt;
+      const previousFinishedState = game.finishedState;
       game.phase = "FINISHED";
       game.phaseEndsAt = null;
+      game.finishedState = finishedState;
 
       try {
         return {
@@ -1137,6 +1212,7 @@ export class GameManager {
       } catch (error) {
         game.phase = previousPhase;
         game.phaseEndsAt = previousPhaseEndsAt;
+        game.finishedState = previousFinishedState;
 
         if (error instanceof RoomManagerError) {
           throw error;
@@ -1203,6 +1279,7 @@ export class GameManager {
           drawerSocketId: nextDrawer.socketId,
           secret: {
             roomCode: room.code,
+            gameId: game.gameId,
             turnId: nextTurn.turnId,
             drawerPlayerId: nextDrawer.id,
             secretLevel: nextTurn.secretLevel,
@@ -1230,11 +1307,119 @@ export class GameManager {
     }
   }
 
+  requestRematch(socketId: string): RequestRematchInternalResult {
+    const room = this.roomManager.getPlayerRoomBySocketId(socketId);
+    if (room === undefined) {
+      throw new RoomManagerError(
+        "NOT_IN_ROOM",
+        "Cette connexion n'appartient à aucun salon.",
+      );
+    }
+
+    const requester = room.players.find(
+      (player) => player.socketId === socketId,
+    );
+    if (requester === undefined) {
+      throw new RoomManagerError(
+        "PLAYER_NOT_FOUND",
+        "Le joueur associé à cette connexion est introuvable.",
+      );
+    }
+
+    if (room.game === null) {
+      throw new RoomManagerError(
+        "GAME_NOT_STARTED",
+        "Aucune partie n’est disponible pour une revanche.",
+      );
+    }
+
+    if (!requester.isHost) {
+      throw new RoomManagerError(
+        "NOT_HOST",
+        "Seul l’hôte peut proposer une revanche.",
+      );
+    }
+
+    if (room.game.phase !== "FINISHED") {
+      throw new RoomManagerError(
+        "GAME_NOT_FINISHED",
+        "La revanche ne peut être proposée qu’après la fin de la partie.",
+      );
+    }
+
+    return {
+      room: this.resetRoomForRematch(room.code),
+    };
+  }
+
+  resetRoomForRematch(roomCode: string): PublicRoomState {
+    const room = this.roomManager.getRoomByCode(roomCode);
+    if (room === undefined) {
+      throw new RoomManagerError(
+        "ROOM_NOT_FOUND",
+        "Aucun salon ne correspond à ce code.",
+      );
+    }
+
+    if (room.game === null) {
+      throw new RoomManagerError(
+        "GAME_NOT_STARTED",
+        "Aucune partie n’est disponible pour une revanche.",
+      );
+    }
+
+    if (room.game.phase !== "FINISHED") {
+      throw new RoomManagerError(
+        "GAME_NOT_FINISHED",
+        "La revanche ne peut être proposée qu’après la fin de la partie.",
+      );
+    }
+
+    this.clearScheduledTransition(room.code);
+    const previousGame = room.game;
+    const previousPlayerStates = room.players.map((player) => ({
+      isReady: player.isReady,
+      score: player.score,
+    }));
+
+    room.game = null;
+    for (const player of room.players) {
+      player.isReady = false;
+      player.score = 0;
+    }
+
+    try {
+      return this.roomManager.getPublicRoomState(room.code);
+    } catch (error) {
+      room.game = previousGame;
+      room.players.forEach((player, index) => {
+        const previousState = previousPlayerStates[index];
+        if (previousState !== undefined) {
+          player.isReady = previousState.isReady;
+          player.score = previousState.score;
+        }
+      });
+
+      if (error instanceof RoomManagerError) {
+        throw error;
+      }
+
+      throw new RoomManagerError(
+        "INTERNAL_ERROR",
+        "Impossible de préparer le salon pour une revanche.",
+      );
+    }
+  }
+
   cancelGame(roomCode: string): boolean {
     const room = this.roomManager.getRoomByCode(roomCode);
     this.clearScheduledTransition(roomCode);
 
     if (room === undefined || room.game === null) {
+      return false;
+    }
+
+    if (room.game.phase === "FINISHED") {
       return false;
     }
 

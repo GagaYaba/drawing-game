@@ -128,6 +128,7 @@ function createHarness(
 
   const gameManager = new GameManager(prepared.roomManager, {
     clock: () => now,
+    generateGameId: () => "game-1",
     introDurationMs: INTRO_DURATION_MS,
     prompts,
     shufflePlayerIds: (playerIds) => [...playerIds],
@@ -413,6 +414,7 @@ describe("GameManager turn progression", () => {
             )?.socketId,
           secret: {
             roomCode: harness.roomCode,
+            gameId: nextGame.gameId,
             turnId: nextGame.currentTurn.turnId,
             drawerPlayerId: nextGame.currentTurn.drawerPlayerId,
             secretLevel: nextGame.currentTurn.secretLevel,

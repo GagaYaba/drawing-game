@@ -6,6 +6,7 @@ import {
   type ClientToServerEvents,
   type ContinueGameSuccessData,
   type PublicRoomState,
+  type RequestRematchSuccessData,
   type RoomSessionData,
   type ServerToClientEvents,
   type StartGameSuccessData,
@@ -305,6 +306,44 @@ export function registerSocketHandlers(
           request.acknowledge({
             success: true,
             data: { room: continuation.room },
+          });
+        } catch (error) {
+          request.acknowledge(actionFailure(error));
+        }
+      },
+    );
+
+    socket.on(
+      SOCKET_EVENTS.GAME_REQUEST_REMATCH,
+      (...argumentsReceived: unknown[]) => {
+        const request = getActionRequest<RequestRematchSuccessData>(
+          argumentsReceived,
+        );
+        if (request === null) {
+          return;
+        }
+
+        if (request.payload !== undefined) {
+          request.acknowledge({
+            success: false,
+            error: {
+              code: "INVALID_GAME_REMATCH_REQUEST",
+              message:
+                "La demande de revanche ne doit contenir aucun argument.",
+            },
+          });
+          return;
+        }
+
+        try {
+          const rematch = gameManager.requestRematch(socket.id);
+          io.to(rematch.room.code).emit(
+            SOCKET_EVENTS.ROOM_STATE,
+            rematch.room,
+          );
+          request.acknowledge({
+            success: true,
+            data: { room: rematch.room },
           });
         } catch (error) {
           request.acknowledge(actionFailure(error));

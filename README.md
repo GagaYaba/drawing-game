@@ -18,8 +18,11 @@ Application multijoueur de dessin en temps réel. Les joueurs créent ou rejoign
 - confidentialité des valeurs pendant `VOTING` : seul le compteur d’estimations reçues est public ;
 - passage automatique à `REVEAL` après le dernier vote requis, avec attribution atomique des points, publication du détail des résultats et classement cumulatif ;
 - continuation réservée à l'hôte après chaque révélation, jusqu'à l'écran `FINISHED` qui annonce tous les gagnants ex æquo ;
+- identifiant `gameId` unique généré par le serveur pour chaque partie lancée dans un salon ;
+- revanche autoritaire proposée uniquement par l'hôte depuis `FINISHED`, avec retour de tout le groupe au lobby, scores remis à zéro et nouveaux statuts prêts requis ;
 - fermeture du salon aux nouveaux joueurs dès le lancement ;
-- annulation de la partie et retour au lobby si un joueur quitte ou se déconnecte ;
+- annulation de la partie et retour au lobby si un joueur quitte ou se déconnecte pendant une phase active ;
+- conservation du résultat historique si un joueur quitte pendant `FINISHED`, avec transfert de l'hôte permettant au groupe restant de proposer une revanche ;
 - départ volontaire ou retrait automatique à la déconnexion, avec transfert du rôle d'hôte au joueur présent depuis le plus longtemps ;
 - suppression automatique d'un salon devenu vide ;
 - messages d'erreur pour les codes invalides, salons inexistants ou pleins et pseudonymes invalides ou déjà utilisés ;
@@ -116,11 +119,27 @@ Le serveur reste la source d'autorité pour les phases et leurs transitions :
 3. `DRAWING` : la transition est diffusée par le serveur. Le dessinateur voit la consigne, son niveau secret sur 10 et l'éditeur vectoriel. Les autres joueurs voient la consigne, l'identité du dessinateur et un écran d'attente, mais jamais son niveau secret.
 4. `VOTING` : après validation du dessin, chaque joueur autre que le dessinateur choisit localement une valeur de 1 à 10, peut la modifier puis la confirme définitivement. Le serveur identifie le votant grâce à son socket, refuse le dessinateur et les doubles votes, et ne publie que la progression globale.
 5. `REVEAL` : le dernier vote valide déclenche cette phase dans la même opération serveur. Les points sont appliqués une seule fois, puis le niveau secret, les estimations, leurs distances, les points gagnés, les scores totaux, le classement et le prochain dessinateur deviennent publics.
-6. `FINISHED` : après le dernier tour de la deuxième manche, l'hôte continue une dernière fois depuis `REVEAL`. Le serveur publie alors le classement final, le nombre de manches et de tours terminés ainsi que tous les gagnants au meilleur score.
+6. `FINISHED` : après le dernier tour de la deuxième manche, l'hôte continue une dernière fois depuis `REVEAL`. Le serveur publie alors le classement final, le nombre de manches et de tours terminés ainsi que tous les gagnants au meilleur score. L'hôte peut ensuite proposer une revanche dans le même salon.
 
-L'ordre des joueurs est mélangé une seule fois au lancement, puis reste fixe pendant les deux manches. Chaque joueur dessine exactement une fois par manche, soit `nombre de joueurs × 2` tours. Depuis chaque `REVEAL`, seul l'hôte peut envoyer `game:continue` pour démarrer le tour suivant ou terminer la partie. Aucune continuation ni revanche directe n'est disponible depuis `FINISHED`.
+L'ordre des joueurs est mélangé une seule fois au lancement, puis reste fixe pendant les deux manches. Chaque joueur dessine exactement une fois par manche, soit `nombre de joueurs × 2` tours. Depuis chaque `REVEAL`, seul l'hôte peut envoyer `game:continue` pour démarrer le tour suivant ou terminer la partie. Depuis `FINISHED`, seul l'hôte peut envoyer `game:request-rematch`.
 
-Chaque tour possède un `turnId` unique. Le niveau secret est transmis avec ce `turnId` dans l'événement privé `turn:secret`, au seul socket du dessinateur. Il ne fait pas partie de l'état public avant `REVEAL`. Lorsqu'un nouveau `turnId` public apparaît, ou lorsque `FINISHED` est publié, le client efface le secret privé et l'estimation locale précédents ; il ignore également tout `turn:secret` retardé qui ne correspond plus au salon, au tour ou au dessinateur actifs.
+Chaque partie possède un `gameId` généré avec `crypto.randomUUID()` au moment de son lancement. Le code du salon reste stable, mais une nouvelle partie lancée après une revanche reçoit toujours un nouveau `gameId`. Chaque tour possède en plus son propre `turnId`. Le niveau secret est transmis avec `gameId` et `turnId` dans l'événement privé `turn:secret`, au seul socket du dessinateur. Il ne fait pas partie de l'état public avant `REVEAL`. Le client n'accepte un secret que si le salon, la partie, le tour et le dessinateur correspondent encore à son état public actif ; les acknowledgements retardés sont également neutralisés par les jetons locaux d'action et les changements d'identifiants.
+
+### Revanche dans le même salon
+
+La revanche ne démarre pas automatiquement une nouvelle partie et ne fait l'objet d'aucun vote collectif. Sur l'écran final, l'hôte voit le bouton **Proposer une revanche** ; les autres joueurs voient que cette action lui est réservée. Le serveur vérifie le socket, le joueur, son rôle d'hôte et la phase `FINISHED` avant d'accepter `game:request-rematch`.
+
+Une demande acceptée :
+
+- conserve le code du salon, les joueurs encore présents, leurs identifiants publics, leur ordre d'arrivée et l'hôte courant ;
+- supprime entièrement l'état de la partie terminée ;
+- remet chaque score à `0` et chaque statut `isReady` à `false` ;
+- efface les dessins, estimations, secrets, résultats, classements temporaires, identifiants de tour et consignes utilisées avec l'ancien état de partie ;
+- diffuse un nouvel état public avec `game: null`, `allPlayersReady: false` et `canStart: false`.
+
+Le lobby réapparaît sans rechargement et annonce que la revanche est prête. Chaque joueur doit cliquer de nouveau sur **Je suis prêt**. Lorsque les conditions ordinaires sont réunies, l'hôte utilise le bouton existant **Lancer la partie**. Ce lancement recrée une partie indépendante avec un nouveau `gameId`, un nouvel ordre mélangé, un nouveau premier `turnId`, un nouveau secret et une liste de consignes utilisées vide. Les consignes de la partie précédente peuvent donc être sélectionnées à nouveau.
+
+Deux demandes de revanche successives ne peuvent pas réinitialiser le salon deux fois : après la première, `game` vaut déjà `null` et la seconde est refusée. Une demande provenant d'un non-hôte, d'un socket extérieur ou d'une phase autre que `FINISHED` est également refusée côté serveur.
 
 ### Interface plein écran pendant la partie
 
@@ -197,7 +216,7 @@ Le dessinateur gagne `1` point pour chaque estimation exacte ou située à une u
 
 L'écran de révélation affiche `Exact !` pour une distance nulle ou `Écart : N` dans les autres cas, les points gagnés par chaque votant, le résultat du dessinateur, les scores totaux, le classement et le prochain dessinateur. Le classement est trié par score décroissant. Les joueurs à égalité partagent le même rang selon un classement de compétition, par exemple `1, 2, 2, 4`, tandis que leur ordre d'affichage reste stable selon l'ordre de rotation.
 
-Un bouton de continuation est proposé uniquement à l'hôte. Il démarre le tour suivant avec un nouveau `turnId`, une nouvelle consigne encore inutilisée et le prochain dessinateur de la rotation. Après le dernier tour, il ouvre `FINISHED`, qui affiche le classement final et tous les gagnants ex æquo. Cet écran ne propose pas de revanche.
+Un bouton de continuation est proposé uniquement à l'hôte. Il démarre le tour suivant avec un nouveau `turnId`, une nouvelle consigne encore inutilisée et le prochain dessinateur de la rotation. Après le dernier tour, il ouvre `FINISHED`, qui affiche le classement final et tous les gagnants ex æquo. Cet écran propose ensuite la revanche uniquement à l'hôte.
 
 ## Dessin vectoriel
 
@@ -242,8 +261,10 @@ La soumission utilise l'événement `drawing:submit` avec le payload `{ drawing 
 6. Sur un premier votant, choisissez plusieurs valeurs avant de confirmer la dernière. Vérifiez que sa réponse se verrouille et que seul le compteur public passe à `1 sur 2`.
 7. Vérifiez que le dessinateur ne possède aucun contrôle de vote, puis soumettez la dernière estimation depuis le second votant. Tous les clients doivent passer directement à `REVEAL` et afficher le secret, les réponses, leurs écarts, les points du tour, les scores totaux et le classement.
 8. Depuis le client hôte, lancez le tour suivant. Vérifiez le changement de dessinateur, de `turnId` et de consigne, ainsi que la remise à zéro du dessin, du secret privé et de l'estimation locale. Les autres clients ne doivent jamais recevoir le nouveau secret.
-9. Continuez jusqu'au terme des deux manches. Vérifiez que chaque joueur a dessiné deux fois dans le même ordre, qu'aucune consigne n'a été répétée et que `FINISHED` affiche le classement final ainsi que tous les gagnants ex æquo sans bouton de revanche.
-10. Contrôlez aussi `/api/health`, le bouton de ping Socket.IO, le responsive à 320 px et le lancement de production décrits plus bas.
+9. Continuez jusqu'au terme des deux manches. Vérifiez que chaque joueur a dessiné deux fois dans le même ordre, qu'aucune consigne n'a été répétée et que `FINISHED` affiche le classement final ainsi que tous les gagnants ex æquo.
+10. Vérifiez que seul l'hôte voit **Proposer une revanche**, puis utilisez ce bouton. Les trois clients doivent revenir au même lobby avec les mêmes identifiants, des scores à zéro et tous les statuts prêts désactivés.
+11. Remettez les trois joueurs prêts et relancez. Vérifiez que le nouveau `gameId` et le nouveau `turnId` diffèrent de ceux de la partie terminée, que l'ordre a été mélangé à nouveau et qu'aucun dessin, secret, vote ou classement précédent n'est visible.
+12. Contrôlez aussi le refus d'un non-hôte, le transfert de l'hôte après son départ depuis `FINISHED`, `/api/health`, le bouton de ping Socket.IO, le responsive à 320 px et le lancement de production décrits plus bas.
 
 ## Stockage et durée de vie des salons
 
@@ -251,7 +272,9 @@ Les salons, les joueurs et l'état de partie sont stockés **uniquement dans la 
 
 La session du navigateur n'est pas persistée. Une actualisation de page ou une déconnexion Socket.IO retire immédiatement le joueur du salon et lui fait perdre sa session locale ; aucune reconnexion automatique n'est mise en place.
 
-Dans le lobby, le joueur doit rejoindre manuellement le salon s'il existe encore et le rôle d'hôte est transféré si nécessaire. Pendant `ROUND_INTRO`, `DRAWING`, `VOTING`, `REVEAL` ou `FINISHED`, le départ volontaire, la déconnexion ou l'actualisation de n'importe quel joueur annule la partie pour tout le groupe. Les joueurs restants reviennent au lobby avec un message explicatif, des scores remis à zéro et un statut non prêt. Le dessin, les estimations, les secrets et la progression de la partie annulée disparaissent avec l'état de partie.
+Dans le lobby, le joueur doit rejoindre manuellement le salon s'il existe encore et le rôle d'hôte est transféré si nécessaire. Pendant `ROUND_INTRO`, `DRAWING`, `VOTING` ou `REVEAL`, le départ volontaire, la déconnexion ou l'actualisation de n'importe quel joueur annule la partie pour tout le groupe. Les joueurs restants reviennent au lobby avec un message explicatif, des scores remis à zéro et un statut non prêt. Le dessin, les estimations, les secrets et la progression de la partie annulée disparaissent avec l'état de partie.
+
+`FINISHED` constitue l'unique exception. Un départ retire seulement le joueur de `room.players` : les autres restent sur l'écran final, leurs scores ne sont pas modifiés et `PublicFinishedState.leaderboard` demeure la photographie historique calculée au moment de la fin. Un joueur parti, y compris un gagnant, peut donc rester visible dans ce classement. Si l'hôte part, le joueur restant au `joinedAt` le plus ancien devient l'unique nouvel hôte et peut proposer la revanche. Si le dernier joueur part, le salon et tout timer résiduel sont supprimés.
 
 ## Vérification des types
 
@@ -271,17 +294,18 @@ npm test
 
 Cette commande lance les tests Vitest : tests unitaires de la logique des salons, de la partie, du score, des estimations, du document vectoriel et de sa géométrie, ainsi que des tests d'intégration avec un serveur sur un port éphémère et de vrais clients Socket.IO.
 
-La suite actuelle contient **286 tests**. Elle couvre notamment :
+La suite actuelle contient **311 tests**. Elle couvre notamment :
 
-- les validations strictes des salons, dessins, votes, `game:start` et `game:continue`, ainsi que les autorisations de l'hôte et du dessinateur ;
+- les validations strictes des salons, dessins, votes, `game:start`, `game:continue` et `game:request-rematch`, ainsi que les autorisations de l'hôte et du dessinateur ;
 - la table de points des votants, le plafond de 5 points du dessinateur et l'application atomique et unique des scores ;
 - les scores cumulatifs, le classement, les rangs partagés et les gagnants ex æquo ;
 - la rotation fixe de tous les joueurs pendant deux manches, la continuité des numéros de tour et la transition finale vers `FINISHED` ;
 - l'utilisation unique des consignes pendant une partie ;
-- l'unicité des `turnId`, la remise à zéro des états privés et locaux et le filtrage des événements `turn:secret` retardés ;
+- l'unicité des `gameId` et `turnId`, la remise à zéro des états privés et locaux et le filtrage des événements `turn:secret` retardés ;
 - la confidentialité pendant `DRAWING` et `VOTING`, l'isolation entre salons et les événements Socket.IO ;
-- l'annulation et le retour au lobby après un départ, une actualisation ou une déconnexion, y compris depuis `FINISHED` ;
-- les jauges accessibles, les écrans de dessin et de vote, le détail de `REVEAL`, le bouton de continuation réservé à l'hôte et l'écran final sans revanche.
+- l'annulation et le retour au lobby après un départ pendant une phase active, ainsi que la conservation historique et le transfert d'hôte pendant `FINISHED` ;
+- la revanche complète dans le même salon, le reset des scores et statuts prêts, la nouvelle partie indépendante et l'isolation entre salons ;
+- les jauges accessibles, les écrans de dessin et de vote, le détail de `REVEAL`, le bouton de continuation et la revanche réservés à l'hôte.
 
 ## Build et lancement en production
 
@@ -328,20 +352,19 @@ En développement, le même endpoint est également disponible via le proxy du f
 
 Le bouton envoie l'événement `client:ping`. Le serveur répond uniquement au client concerné avec `server:pong` ; les noms d'événements et leurs payloads sont déclarés dans le workspace `shared`.
 
-Les actions utilisent également des événements typés : `room:create`, `room:join`, `room:leave`, `player:set-ready`, `game:start`, `game:continue`, `drawing:submit` et `guess:submit`. Le serveur diffuse ensuite l'état public à jour avec `room:state`.
+Les actions utilisent également des événements typés : `room:create`, `room:join`, `room:leave`, `player:set-ready`, `game:start`, `game:continue`, `game:request-rematch`, `drawing:submit` et `guess:submit`. Le serveur diffuse ensuite l'état public à jour avec `room:state`.
 
 - pendant `VOTING`, cet état expose uniquement les compteurs du vote ;
 - pendant `REVEAL`, il expose le secret, les résultats détaillés, les scores, le classement et le prochain dessinateur ;
 - pendant `FINISHED`, il expose le classement final, les gagnants et le nombre de manches et de tours terminés.
 
-À chaque nouveau tour, `turn:secret` transmet uniquement au dessinateur les champs `roomCode`, `turnId`, `drawerPlayerId` et `secretLevel`. Après `game:continue`, le nouvel état public est diffusé à toute la room, puis ce secret est adressé au seul socket concerné. Aucun nouveau secret n'est envoyé lors du passage à `FINISHED`. `game:cancelled` informe les joueurs restants qu'un départ, une actualisation ou une déconnexion a interrompu et réinitialisé la partie.
+À chaque nouveau tour, `turn:secret` transmet uniquement au dessinateur les champs `roomCode`, `gameId`, `turnId`, `drawerPlayerId` et `secretLevel`. Après `game:continue`, le nouvel état public est diffusé à toute la room, puis ce secret est adressé au seul socket concerné. Aucun nouveau secret n'est envoyé lors du passage à `FINISHED`. `game:request-rematch` ne reçoit aucun payload métier et répond par un acknowledgement typé contenant le nouvel état public du lobby. `game:cancelled` informe les joueurs restants qu'un départ pendant une phase active a interrompu et réinitialisé la partie.
 
 ## Limites de cette version
 
 Cette version ne comprend pas encore :
 
-- une durée de dessin et un chronomètre de fin de tour ;
 - la reconnexion ou la restauration d'une session après actualisation ;
 - l'authentification et les comptes utilisateurs ;
 - une base de données ou toute autre persistance des salons ;
-- une revanche ou une relance directe depuis `FINISHED`.
+- un vote collectif de revanche, un historique des parties ou une conservation des scores entre deux parties.

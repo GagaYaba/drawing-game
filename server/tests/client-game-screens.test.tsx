@@ -34,6 +34,7 @@ function createGame(
   phase: PublicGameState["phase"],
 ): PublicGameState {
   return {
+    gameId: "game-1",
     phase,
     turnId: "turn-1",
     totalRounds: 2,
@@ -197,6 +198,11 @@ const votingCallbacks = {
 
 const revealCallbacks = {
   onContinueGame: () => false,
+} as const;
+
+const finishedCallbacks = {
+  isHost: false,
+  onRequestRematch: () => false,
 } as const;
 
 function expectPublicGaugeWithoutSecret(markup: string): void {
@@ -784,6 +790,7 @@ describe("FinishedScreen", () => {
     const markup = renderToStaticMarkup(
       <FinishedScreen
         {...commonProps}
+        {...finishedCallbacks}
         finished={finished}
         currentPlayerId={OBSERVER_ID}
       />,
@@ -817,6 +824,7 @@ describe("FinishedScreen", () => {
     const markup = renderToStaticMarkup(
       <FinishedScreen
         {...commonProps}
+        {...finishedCallbacks}
         finished={finished}
         currentPlayerId={DRAWER_ID}
       />,
@@ -844,6 +852,7 @@ describe("FinishedScreen", () => {
     const markup = renderToStaticMarkup(
       <FinishedScreen
         {...commonProps}
+        {...finishedCallbacks}
         finished={finished}
         currentPlayerId={OBSERVER_ID}
       />,

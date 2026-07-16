@@ -71,6 +71,7 @@ function createGame(players: readonly InternalPlayer[]): InternalGame {
   }
 
   return {
+    gameId: "game-1",
     phase: "VOTING",
     totalRounds: 2,
     currentRound: 1,
@@ -105,6 +106,7 @@ function createGame(players: readonly InternalPlayer[]): InternalGame {
     },
     usedPromptIds: [PROMPT.id],
     usedTurnIds: ["turn-1"],
+    finishedState: null,
     startedAt: 1_500,
     phaseEndsAt: null,
   };

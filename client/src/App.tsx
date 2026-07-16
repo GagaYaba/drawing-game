@@ -71,6 +71,7 @@ export function App() {
   const currentPlayerSecret =
     game !== null &&
     game.currentDrawer.id === currentPlayerId &&
+    roomSession.gameSecrets.gameId === game.gameId &&
     roomSession.gameSecrets.turnId === game.turnId
       ? roomSession.gameSecrets.secretLevel
       : null;
@@ -144,8 +145,10 @@ export function App() {
         <FinishedScreen
           finished={game.finished}
           currentPlayerId={currentPlayerId}
+          isHost={currentPlayer?.isHost ?? false}
           pendingAction={roomSession.pendingAction}
           errorMessage={roomSession.errorMessage}
+          onRequestRematch={roomSession.requestRematch}
           onLeaveRoom={roomSession.leaveRoom}
         />
       )}

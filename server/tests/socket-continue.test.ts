@@ -673,6 +673,7 @@ describe("Socket.IO game continuation integration", () => {
           expect(secrets).toEqual([
             {
               roomCode: revealed.room.roomCode,
+              gameId: nextGame.gameId,
               turnId: nextGame.turnId,
               drawerPlayerId: nextGame.currentDrawer.id,
               secretLevel: SECRET_LEVELS[1],
@@ -996,6 +997,7 @@ describe("Socket.IO game continuation integration", () => {
           expect(secrets).toEqual([
             {
               roomCode: firstRoom.room.roomCode,
+              gameId: continuedGame.gameId,
               turnId: continuedGame.turnId,
               drawerPlayerId: continuedGame.currentDrawer.id,
               secretLevel: SECRET_LEVELS[2],
