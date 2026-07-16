@@ -6,6 +6,7 @@ import {
   type GameCancelledPayload,
   type GuessValue,
   type PublicRoomState,
+  type SubmitGuessPayload,
   type TurnSecretPayload,
 } from "@drawing-game/shared";
 
@@ -17,6 +18,7 @@ export interface ClientRoomSession {
 }
 
 export interface ClientGameSecrets {
+  turnId: string | null;
   secretLevel: GuessValue | null;
 }
 
@@ -37,6 +39,7 @@ export type PendingRoomAction =
   | "join"
   | "ready"
   | "start"
+  | "continue"
   | "submitDrawing"
   | "leave"
   | null;
@@ -47,6 +50,7 @@ const EMPTY_SESSION: ClientRoomSession = {
 };
 
 const EMPTY_GAME_SECRETS: ClientGameSecrets = {
+  turnId: null,
   secretLevel: null,
 };
 
@@ -86,12 +90,48 @@ function validateRoomCode(roomCode: string) {
     : "Le code de la partie doit contenir 5 lettres ou chiffres.";
 }
 
+export function didPublicTurnChange(
+  previousTurnId: string | null,
+  nextTurnId: string | null,
+) {
+  return previousTurnId !== nextTurnId;
+}
+
+export function isTurnSecretForActiveDrawer(
+  payload: TurnSecretPayload,
+  context: {
+    roomCode: string | null;
+    turnId: string | null;
+    playerId: string | null;
+  },
+) {
+  return (
+    context.playerId !== null &&
+    context.roomCode !== null &&
+    context.turnId !== null &&
+    payload.roomCode === context.roomCode &&
+    payload.turnId === context.turnId &&
+    payload.drawerPlayerId === context.playerId &&
+    Number.isInteger(payload.secretLevel) &&
+    payload.secretLevel >= 1 &&
+    payload.secretLevel <= 10
+  );
+}
+
+export function createSubmitGuessPayload(
+  turnId: string,
+  value: GuessValue,
+): SubmitGuessPayload {
+  return { turnId, value };
+}
+
 export function useRoomSession() {
   const [nickname, setNickname] = useState("");
   const [roomCode, setRoomCode] = useState(getInitialRoomCode);
   const [session, setSession] = useState<ClientRoomSession>(EMPTY_SESSION);
   const currentPlayerIdRef = useRef<string | null>(null);
   const currentRoomCodeRef = useRef<string | null>(null);
+  const currentTurnIdRef = useRef<string | null>(null);
   const [gameSecrets, setGameSecrets] =
     useState<ClientGameSecrets>(EMPTY_GAME_SECRETS);
   const [guessState, setGuessState] =
@@ -139,6 +179,7 @@ export function useRoomSession() {
       if (!currentPlayerIsPresent) {
         currentPlayerIdRef.current = null;
         currentRoomCodeRef.current = null;
+        currentTurnIdRef.current = null;
         pendingActionRef.current = null;
         actionTokenRef.current += 1;
         setPendingAction(null);
@@ -153,6 +194,17 @@ export function useRoomSession() {
       }
 
       currentRoomCodeRef.current = room.code;
+      const nextTurnId = room.game?.turnId ?? null;
+      const turnChanged = didPublicTurnChange(
+        currentTurnIdRef.current,
+        nextTurnId,
+      );
+      currentTurnIdRef.current = nextTurnId;
+
+      if (turnChanged) {
+        setGameSecrets(EMPTY_GAME_SECRETS);
+        resetGuessState();
+      }
 
       if (
         pendingActionRef.current === "submitDrawing" &&
@@ -164,9 +216,20 @@ export function useRoomSession() {
       }
 
       if (
+        pendingActionRef.current === "continue" &&
+        (turnChanged || room.game?.phase === "FINISHED")
+      ) {
+        pendingActionRef.current = null;
+        actionTokenRef.current += 1;
+        setPendingAction(null);
+      }
+
+      if (
+        turnChanged ||
         room.game === null ||
         room.game.currentDrawer.id !== currentPlayerId ||
-        room.game.phase === "REVEAL"
+        room.game.phase === "REVEAL" ||
+        room.game.phase === "FINISHED"
       ) {
         setGameSecrets(EMPTY_GAME_SECRETS);
       }
@@ -176,7 +239,7 @@ export function useRoomSession() {
         (room.game.phase === "VOTING" || room.game.phase === "REVEAL") &&
         room.game.currentDrawer.id !== currentPlayerId;
 
-      if (!shouldKeepGuessState) {
+      if (!turnChanged && !shouldKeepGuessState) {
         resetGuessState();
       }
 
@@ -189,18 +252,18 @@ export function useRoomSession() {
     };
 
     const handleTurnSecret = (payload: TurnSecretPayload) => {
-      if (
-        currentPlayerIdRef.current === null ||
-        payload.roomCode !== currentRoomCodeRef.current ||
-        payload.drawerPlayerId !== currentPlayerIdRef.current ||
-        !Number.isInteger(payload.secretLevel) ||
-        payload.secretLevel < 1 ||
-        payload.secretLevel > 10
-      ) {
+      if (!isTurnSecretForActiveDrawer(payload, {
+        roomCode: currentRoomCodeRef.current,
+        turnId: currentTurnIdRef.current,
+        playerId: currentPlayerIdRef.current,
+      })) {
         return;
       }
 
-      setGameSecrets({ secretLevel: payload.secretLevel as GuessValue });
+      setGameSecrets({
+        turnId: payload.turnId,
+        secretLevel: payload.secretLevel as GuessValue,
+      });
     };
 
     const handleGameCancelled = (payload: GameCancelledPayload) => {
@@ -211,12 +274,16 @@ export function useRoomSession() {
         return;
       }
 
+      currentTurnIdRef.current = null;
       setGameSecrets(EMPTY_GAME_SECRETS);
       resetGuessState();
       setErrorMessage(null);
       setNoticeMessage(payload.message);
 
-      if (pendingActionRef.current === "submitDrawing") {
+      if (
+        pendingActionRef.current === "submitDrawing" ||
+        pendingActionRef.current === "continue"
+      ) {
         pendingActionRef.current = null;
         actionTokenRef.current += 1;
         setPendingAction(null);
@@ -233,6 +300,7 @@ export function useRoomSession() {
 
       currentPlayerIdRef.current = null;
       currentRoomCodeRef.current = null;
+      currentTurnIdRef.current = null;
       pendingActionRef.current = null;
       actionTokenRef.current += 1;
       setPendingAction(null);
@@ -279,6 +347,7 @@ export function useRoomSession() {
     actionTokenRef.current += 1;
     currentPlayerIdRef.current = null;
     currentRoomCodeRef.current = null;
+    currentTurnIdRef.current = null;
     updatePendingAction(null);
     setGameSecrets(EMPTY_GAME_SECRETS);
     resetGuessState();
@@ -322,6 +391,7 @@ export function useRoomSession() {
     setErrorMessage(null);
     setNoticeMessage(null);
     setGameSecrets(EMPTY_GAME_SECRETS);
+    currentTurnIdRef.current = null;
     resetGuessState();
     const actionToken = beginAction("create");
 
@@ -376,6 +446,7 @@ export function useRoomSession() {
     setErrorMessage(null);
     setNoticeMessage(null);
     setGameSecrets(EMPTY_GAME_SECRETS);
+    currentTurnIdRef.current = null;
     resetGuessState();
     const actionToken = beginAction("join");
 
@@ -495,6 +566,85 @@ export function useRoomSession() {
         }));
       },
     );
+  };
+
+  const continueGame = () => {
+    if (
+      pendingActionRef.current !== null ||
+      session.room === null ||
+      !ensureSocketIsConnected()
+    ) {
+      return false;
+    }
+
+    const game = session.room.game;
+    const currentPlayer = session.room.players.find(
+      (player) => player.id === session.currentPlayerId,
+    );
+
+    if (game === null || game.phase !== "REVEAL") {
+      setErrorMessage(
+        "La partie ne peut continuer que depuis l’écran de révélation.",
+      );
+      return false;
+    }
+
+    if (currentPlayer === undefined || !currentPlayer.isHost) {
+      setErrorMessage("Seul l’hôte peut lancer la suite de la partie.");
+      return false;
+    }
+
+    setErrorMessage(null);
+    setNoticeMessage(null);
+    const actionToken = beginAction("continue");
+
+    socket.timeout(ACTION_TIMEOUT_MS).emit(
+      SOCKET_EVENTS.GAME_CONTINUE,
+      (timeoutError, result) => {
+        if (actionToken !== actionTokenRef.current) {
+          return;
+        }
+
+        if (timeoutError) {
+          actionTokenRef.current += 1;
+          updatePendingAction(null);
+          setErrorMessage(
+            "La réponse du serveur a expiré. Attendez la synchronisation de la partie avant de réessayer.",
+          );
+          return;
+        }
+
+        if (!result.success) {
+          updatePendingAction(null);
+          setErrorMessage(result.error.message);
+          return;
+        }
+
+        const nextGame = result.data.room.game;
+        const nextTurnId = nextGame?.turnId ?? null;
+        const turnChanged = didPublicTurnChange(
+          currentTurnIdRef.current,
+          nextTurnId,
+        );
+        currentTurnIdRef.current = nextTurnId;
+
+        if (turnChanged || nextGame?.phase === "FINISHED") {
+          setGameSecrets(EMPTY_GAME_SECRETS);
+          resetGuessState();
+        }
+
+        updatePendingAction(null);
+        setSession((currentSession) => ({
+          currentPlayerId: currentSession.currentPlayerId,
+          room:
+            currentSession.currentPlayerId === null
+              ? currentSession.room
+              : result.data.room,
+        }));
+      },
+    );
+
+    return true;
   };
 
   const submitDrawing = (drawing: DrawingDocument) => {
@@ -652,7 +802,7 @@ export function useRoomSession() {
 
     socket.timeout(ACTION_TIMEOUT_MS).emit(
       SOCKET_EVENTS.GUESS_SUBMIT,
-      { value: selectedValue },
+      createSubmitGuessPayload(game.turnId, selectedValue),
       (timeoutError, result) => {
         if (guessActionToken !== guessActionTokenRef.current) {
           return;
@@ -724,6 +874,7 @@ export function useRoomSession() {
         setErrorMessage(null);
         currentPlayerIdRef.current = null;
         currentRoomCodeRef.current = null;
+        currentTurnIdRef.current = null;
         setGameSecrets(EMPTY_GAME_SECRETS);
         resetGuessState();
         setNoticeMessage(null);
@@ -747,6 +898,7 @@ export function useRoomSession() {
     joinRoom,
     setReady,
     startGame,
+    continueGame,
     submitDrawing,
     selectGuess,
     submitGuess,

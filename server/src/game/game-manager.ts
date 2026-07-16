@@ -1,6 +1,10 @@
+import { randomUUID } from "node:crypto";
+
 import type {
   GuessValue,
+  PublicFinishedState,
   PublicGameState,
+  PublicLeaderboardEntry,
   PublicRevealState,
 } from "@drawing-game/shared";
 
@@ -19,8 +23,11 @@ import {
 } from "./game-random.js";
 import type {
   DrawingPrompt,
+  ContinueGameInternalResult,
   GameManagerOptions,
   InternalGame,
+  InternalTurn,
+  InternalTurnScoreResult,
   StartGameInternalResult,
   SubmitDrawingInternalResult,
   SubmitGuessInternalResult,
@@ -72,6 +79,191 @@ function validateSecretLevel(
   }
 }
 
+function validateTurnId(turnId: string): void {
+  if (turnId.length === 0 || turnId.trim() !== turnId) {
+    throw new RoomManagerError(
+      "INTERNAL_ERROR",
+      "Impossible de générer un identifiant de tour valide.",
+    );
+  }
+}
+
+function validatePlayerScore(player: InternalPlayer): void {
+  if (!Number.isSafeInteger(player.score) || player.score < 0) {
+    throw new RoomManagerError(
+      "INTERNAL_ERROR",
+      "Un score de joueur interne est invalide.",
+    );
+  }
+}
+
+function cloneTurnScoreResult(
+  result: InternalTurnScoreResult,
+): InternalTurnScoreResult {
+  return {
+    guesses: Object.fromEntries(
+      Object.entries(result.guesses).map(([playerId, guess]) => [
+        playerId,
+        { ...guess },
+      ]),
+    ),
+    drawer: { ...result.drawer },
+  };
+}
+
+export function calculateGuessPoints(distance: number): number {
+  if (
+    !Number.isFinite(distance) ||
+    !Number.isInteger(distance) ||
+    distance < 0
+  ) {
+    return 0;
+  }
+
+  return Math.max(0, 5 - distance);
+}
+
+export function calculateDrawerPoints(
+  distances: readonly number[],
+): number {
+  const closeGuessCount = distances.reduce(
+    (count, distance) =>
+      Number.isFinite(distance) &&
+      Number.isInteger(distance) &&
+      distance >= 0 &&
+      distance <= 1
+        ? count + 1
+        : count,
+    0,
+  );
+
+  return Math.min(5, closeGuessCount);
+}
+
+export interface NextTurnPosition {
+  currentRound: number;
+  currentDrawerIndex: number;
+  currentTurnNumber: number;
+}
+
+type TurnPositionSource = Pick<
+  InternalGame,
+  "currentRound" | "currentDrawerIndex" | "totalRounds" | "turnOrder"
+>;
+
+export function getNextTurnPosition(
+  game: TurnPositionSource,
+): NextTurnPosition | null {
+  const playerCount = game.turnOrder.length;
+
+  if (
+    playerCount < 1 ||
+    !Number.isSafeInteger(game.totalRounds) ||
+    game.totalRounds < 1 ||
+    !Number.isSafeInteger(game.currentRound) ||
+    game.currentRound < 1 ||
+    game.currentRound > game.totalRounds ||
+    !Number.isSafeInteger(game.currentDrawerIndex) ||
+    game.currentDrawerIndex < 0 ||
+    game.currentDrawerIndex >= playerCount
+  ) {
+    throw new RoomManagerError(
+      "INTERNAL_ERROR",
+      "La position du tour actuel est invalide.",
+    );
+  }
+
+  const nextDrawerIndex = game.currentDrawerIndex + 1;
+  if (nextDrawerIndex < playerCount) {
+    return {
+      currentRound: game.currentRound,
+      currentDrawerIndex: nextDrawerIndex,
+      currentTurnNumber:
+        (game.currentRound - 1) * playerCount + nextDrawerIndex + 1,
+    };
+  }
+
+  if (game.currentRound >= game.totalRounds) {
+    return null;
+  }
+
+  return {
+    currentRound: game.currentRound + 1,
+    currentDrawerIndex: 0,
+    currentTurnNumber: game.currentRound * playerCount + 1,
+  };
+}
+
+export function hasNextTurn(game: TurnPositionSource): boolean {
+  return getNextTurnPosition(game) !== null;
+}
+
+export function initializeTurn(
+  turnId: string,
+  drawerPlayerId: string,
+  prompt: DrawingPrompt,
+  secretLevel: GuessValue,
+): InternalTurn {
+  return {
+    turnId,
+    drawerPlayerId,
+    prompt,
+    secretLevel,
+    drawing: null,
+    drawingSubmittedAt: null,
+    guesses: {},
+    scoresAppliedAt: null,
+    scoreResult: null,
+  };
+}
+
+export function buildLeaderboard(
+  players: readonly InternalPlayer[],
+  turnOrder: readonly string[],
+): PublicLeaderboardEntry[] {
+  const orderByPlayerId = new Map(
+    turnOrder.map((playerId, index) => [playerId, index]),
+  );
+
+  const sortedPlayers = [...players].sort((left, right) => {
+    validatePlayerScore(left);
+    validatePlayerScore(right);
+
+    if (left.score !== right.score) {
+      return right.score - left.score;
+    }
+
+    const leftOrder =
+      orderByPlayerId.get(left.id) ?? Number.MAX_SAFE_INTEGER;
+    const rightOrder =
+      orderByPlayerId.get(right.id) ?? Number.MAX_SAFE_INTEGER;
+
+    return leftOrder - rightOrder;
+  });
+
+  let previousScore: number | null = null;
+  let previousRank = 0;
+
+  return sortedPlayers.map((player, index) => {
+    const rank =
+      previousScore !== null && player.score === previousScore
+        ? previousRank
+        : index + 1;
+
+    previousScore = player.score;
+    previousRank = rank;
+
+    return {
+      rank,
+      player: {
+        id: player.id,
+        nickname: player.nickname,
+      },
+      score: player.score,
+    };
+  });
+}
+
 export function getEligibleVoterIds(
   game: InternalGame,
   players: readonly InternalPlayer[],
@@ -113,10 +305,134 @@ export function areAllGuessesSubmitted(
   );
 }
 
+export function applyTurnScores(
+  game: InternalGame,
+  players: readonly InternalPlayer[],
+  appliedAt: number,
+): InternalTurnScoreResult {
+  const turn = game.currentTurn;
+  const hasAppliedTimestamp = turn.scoresAppliedAt !== null;
+  const hasScoreResult = turn.scoreResult !== null;
+
+  if (hasAppliedTimestamp || hasScoreResult) {
+    if (!hasAppliedTimestamp || !hasScoreResult) {
+      throw new RoomManagerError(
+        "INTERNAL_ERROR",
+        "Le calcul des scores du tour est incohérent.",
+      );
+    }
+
+    return cloneTurnScoreResult(turn.scoreResult as InternalTurnScoreResult);
+  }
+
+  if (!Number.isFinite(appliedAt)) {
+    throw new RoomManagerError(
+      "INTERNAL_ERROR",
+      "Impossible de dater le calcul des scores.",
+    );
+  }
+
+  const eligibleVoterIds = getEligibleVoterIds(game, players);
+  if (!areAllGuessesSubmitted(game, eligibleVoterIds)) {
+    throw new RoomManagerError(
+      "INTERNAL_ERROR",
+      "Toutes les estimations doivent être présentes avant le calcul des scores.",
+    );
+  }
+
+  const playersById = new Map(players.map((player) => [player.id, player]));
+  const drawer = playersById.get(turn.drawerPlayerId);
+  if (drawer === undefined) {
+    throw new RoomManagerError(
+      "INTERNAL_ERROR",
+      "Le dessinateur du tour est introuvable.",
+    );
+  }
+
+  validatePlayerScore(drawer);
+
+  const distances: number[] = [];
+  const guessResults: InternalTurnScoreResult["guesses"] = {};
+  const scoreUpdates = new Map<string, number>();
+
+  for (const playerId of eligibleVoterIds) {
+    const player = playersById.get(playerId);
+    const guess = turn.guesses[playerId];
+
+    if (
+      player === undefined ||
+      guess === undefined ||
+      guess.playerId !== playerId
+    ) {
+      throw new RoomManagerError(
+        "INTERNAL_ERROR",
+        "Une estimation attendue est introuvable.",
+      );
+    }
+
+    validatePlayerScore(player);
+    const distance = Math.abs(guess.value - turn.secretLevel);
+    const pointsEarned = calculateGuessPoints(distance);
+    const totalScore = player.score + pointsEarned;
+
+    distances.push(distance);
+    scoreUpdates.set(playerId, totalScore);
+    guessResults[playerId] = {
+      playerId,
+      distance,
+      pointsEarned,
+      totalScore,
+    };
+  }
+
+  const closeGuessCount = distances.filter(
+    (distance) => distance <= 1,
+  ).length;
+  const drawerPoints = calculateDrawerPoints(distances);
+  const drawerTotalScore = drawer.score + drawerPoints;
+  const result: InternalTurnScoreResult = {
+    guesses: guessResults,
+    drawer: {
+      playerId: drawer.id,
+      closeGuessCount,
+      pointsEarned: drawerPoints,
+      totalScore: drawerTotalScore,
+    },
+  };
+
+  scoreUpdates.set(drawer.id, drawerTotalScore);
+  for (const [playerId, totalScore] of scoreUpdates) {
+    const player = playersById.get(playerId);
+    if (player === undefined) {
+      throw new RoomManagerError(
+        "INTERNAL_ERROR",
+        "Un joueur à créditer est introuvable.",
+      );
+    }
+    player.score = totalScore;
+  }
+
+  turn.scoreResult = result;
+  turn.scoresAppliedAt = appliedAt;
+
+  return cloneTurnScoreResult(result);
+}
+
 export function createPublicRevealState(
   game: InternalGame,
   players: readonly InternalPlayer[],
 ): PublicRevealState {
+  const scoreResult = game.currentTurn.scoreResult;
+  if (
+    game.currentTurn.scoresAppliedAt === null ||
+    scoreResult === null
+  ) {
+    throw new RoomManagerError(
+      "INTERNAL_ERROR",
+      "Les scores du tour doivent être calculés avant la révélation.",
+    );
+  }
+
   const eligibleVoterIds = getEligibleVoterIds(game, players);
   const eligibleVoterIdSet = new Set(eligibleVoterIds);
 
@@ -124,11 +440,14 @@ export function createPublicRevealState(
     .filter((player) => eligibleVoterIdSet.has(player.id))
     .map((player) => {
       const guess = game.currentTurn.guesses[player.id];
+      const result = scoreResult.guesses[player.id];
 
       if (
         guess === undefined ||
         guess.playerId !== player.id ||
-        !Number.isFinite(guess.submittedAt)
+        !Number.isFinite(guess.submittedAt) ||
+        result === undefined ||
+        result.playerId !== player.id
       ) {
         throw new RoomManagerError(
           "INTERNAL_ERROR",
@@ -142,7 +461,9 @@ export function createPublicRevealState(
           nickname: player.nickname,
         },
         value: guess.value,
-        distance: Math.abs(guess.value - game.currentTurn.secretLevel),
+        distance: result.distance,
+        pointsEarned: result.pointsEarned,
+        totalScore: result.totalScore,
       };
     });
 
@@ -153,9 +474,84 @@ export function createPublicRevealState(
     );
   }
 
+  const drawer = players.find(
+    (player) => player.id === game.currentTurn.drawerPlayerId,
+  );
+  if (
+    drawer === undefined ||
+    scoreResult.drawer.playerId !== drawer.id
+  ) {
+    throw new RoomManagerError(
+      "INTERNAL_ERROR",
+      "Le résultat du dessinateur est introuvable.",
+    );
+  }
+
+  const nextPosition = getNextTurnPosition(game);
+  const nextDrawerId =
+    nextPosition === null
+      ? null
+      : game.turnOrder[nextPosition.currentDrawerIndex];
+  const nextDrawer =
+    nextDrawerId === null || nextDrawerId === undefined
+      ? null
+      : players.find((player) => player.id === nextDrawerId);
+
+  if (nextDrawerId !== null && nextDrawer === undefined) {
+    throw new RoomManagerError(
+      "INTERNAL_ERROR",
+      "Le prochain dessinateur est introuvable.",
+    );
+  }
+
   return {
     secretLevel: game.currentTurn.secretLevel,
     guesses,
+    drawerResult: {
+      player: {
+        id: drawer.id,
+        nickname: drawer.nickname,
+      },
+      closeGuessCount: scoreResult.drawer.closeGuessCount,
+      pointsEarned: scoreResult.drawer.pointsEarned,
+      totalScore: scoreResult.drawer.totalScore,
+    },
+    leaderboard: buildLeaderboard(players, game.turnOrder),
+    nextDrawer:
+      nextDrawer === null || nextDrawer === undefined
+        ? null
+        : {
+            id: nextDrawer.id,
+            nickname: nextDrawer.nickname,
+          },
+  };
+}
+
+export function createPublicFinishedState(
+  game: InternalGame,
+  players: readonly InternalPlayer[],
+): PublicFinishedState {
+  const leaderboard = buildLeaderboard(players, game.turnOrder);
+  const winningScore = leaderboard[0]?.score;
+
+  if (winningScore === undefined) {
+    throw new RoomManagerError(
+      "INTERNAL_ERROR",
+      "Le classement final ne contient aucun joueur.",
+    );
+  }
+
+  return {
+    leaderboard,
+    winners: leaderboard
+      .filter((entry) => entry.score === winningScore)
+      .map((entry) => ({
+        id: entry.player.id,
+        nickname: entry.player.nickname,
+        score: entry.score,
+      })),
+    completedRounds: game.totalRounds,
+    completedTurns: game.turnOrder.length * game.totalRounds,
   };
 }
 
@@ -193,6 +589,7 @@ export function toPublicGameState(
 
   return {
     phase: game.phase,
+    turnId: game.currentTurn.turnId,
     totalRounds: game.totalRounds,
     currentRound: game.currentRound,
     currentTurnNumber:
@@ -231,13 +628,18 @@ export function toPublicGameState(
       game.phase === "REVEAL"
         ? createPublicRevealState(game, players)
         : null,
+    finished:
+      game.phase === "FINISHED"
+        ? createPublicFinishedState(game, players)
+        : null,
   };
 }
 
 export class GameManager {
   private readonly clock;
+  private readonly createTurnId;
   private readonly introDurationMs;
-  private readonly prompts;
+  private readonly prompts: readonly DrawingPrompt[];
   private readonly shuffle;
   private readonly choosePrompt;
   private readonly createSecretLevel;
@@ -251,6 +653,7 @@ export class GameManager {
     options: GameManagerOptions = {},
   ) {
     this.clock = options.clock ?? Date.now;
+    this.createTurnId = options.generateTurnId ?? randomUUID;
     this.introDurationMs =
       options.introDurationMs ?? ROUND_INTRO_DURATION_MS;
     this.prompts = options.prompts ?? DRAWING_PROMPTS;
@@ -272,6 +675,15 @@ export class GameManager {
 
     if (this.prompts.length === 0) {
       throw new RangeError("La banque de consignes ne peut pas être vide.");
+    }
+
+    if (
+      new Set(this.prompts.map((prompt) => prompt.id)).size !==
+      this.prompts.length
+    ) {
+      throw new RangeError(
+        "Les identifiants de consigne doivent être uniques.",
+      );
     }
   }
 
@@ -325,15 +737,10 @@ export class GameManager {
 
     const playerIds = room.players.map((player) => player.id);
     let turnOrder: string[];
-    let selectedPromptCandidate: DrawingPrompt;
-    let secretLevel: number;
 
     try {
       turnOrder = this.shuffle([...playerIds]);
       validateTurnOrder(playerIds, turnOrder);
-      selectedPromptCandidate = this.choosePrompt(this.prompts);
-      secretLevel = this.createSecretLevel();
-      validateSecretLevel(secretLevel);
     } catch (error) {
       if (error instanceof RoomManagerError) {
         throw error;
@@ -342,16 +749,6 @@ export class GameManager {
       throw new RoomManagerError(
         "INTERNAL_ERROR",
         "Impossible de préparer la partie.",
-      );
-    }
-
-    const selectedPrompt = this.prompts.find(
-      (prompt) => prompt.id === selectedPromptCandidate.id,
-    );
-    if (selectedPrompt === undefined) {
-      throw new RoomManagerError(
-        "INTERNAL_ERROR",
-        "Impossible de sélectionner une consigne valide.",
       );
     }
 
@@ -366,6 +763,7 @@ export class GameManager {
       );
     }
 
+    const currentTurn = this.prepareTurn(drawer.id, [], []);
     const startedAt = this.clock();
     if (!Number.isFinite(startedAt)) {
       throw new RoomManagerError(
@@ -374,20 +772,20 @@ export class GameManager {
       );
     }
 
+    const previousScores = room.players.map((player) => player.score);
+    for (const player of room.players) {
+      player.score = 0;
+    }
+
     const game: InternalGame = {
       phase: "ROUND_INTRO",
       totalRounds: TOTAL_ROUNDS,
       currentRound: 1,
       turnOrder,
       currentDrawerIndex: 0,
-      currentTurn: {
-        drawerPlayerId: drawer.id,
-        prompt: selectedPrompt,
-        secretLevel,
-        drawing: null,
-        drawingSubmittedAt: null,
-        guesses: {},
-      },
+      currentTurn,
+      usedPromptIds: [currentTurn.prompt.id],
+      usedTurnIds: [currentTurn.turnId],
       startedAt,
       phaseEndsAt: startedAt + this.introDurationMs,
     };
@@ -403,13 +801,17 @@ export class GameManager {
         drawerSocketId: drawer.socketId,
         secret: {
           roomCode: room.code,
+          turnId: currentTurn.turnId,
           drawerPlayerId: drawer.id,
-          secretLevel,
+          secretLevel: currentTurn.secretLevel,
         },
       };
     } catch (error) {
       room.game = null;
       this.clearScheduledTransition(room.code);
+      room.players.forEach((player, index) => {
+        player.score = previousScores[index] ?? 0;
+      });
 
       if (error instanceof RoomManagerError) {
         throw error;
@@ -572,6 +974,17 @@ export class GameManager {
       );
     }
 
+    const validation = validateSubmitGuessPayload(payload);
+    if (
+      validation.success &&
+      validation.data.turnId !== game.currentTurn.turnId
+    ) {
+      throw new RoomManagerError(
+        "STALE_TURN",
+        "Cette estimation correspond à un tour qui n’est plus actif.",
+      );
+    }
+
     if (
       Object.prototype.hasOwnProperty.call(
         game.currentTurn.guesses,
@@ -584,7 +997,6 @@ export class GameManager {
       );
     }
 
-    const validation = validateSubmitGuessPayload(payload);
     if (!validation.success) {
       throw new RoomManagerError(
         validation.error.code,
@@ -607,14 +1019,22 @@ export class GameManager {
     };
     const previousPhase = game.phase;
     const previousPhaseEndsAt = game.phaseEndsAt;
+    const previousScores = room.players.map((player) => player.score);
+    const previousScoresAppliedAt = game.currentTurn.scoresAppliedAt;
+    const previousScoreResult =
+      game.currentTurn.scoreResult === null
+        ? null
+        : cloneTurnScoreResult(game.currentTurn.scoreResult);
 
     game.currentTurn.guesses[requester.id] = guess;
-    if (areAllGuessesSubmitted(game, eligibleVoterIds)) {
-      game.phase = "REVEAL";
-      game.phaseEndsAt = null;
-    }
 
     try {
+      if (areAllGuessesSubmitted(game, eligibleVoterIds)) {
+        game.phase = "REVEAL";
+        game.phaseEndsAt = null;
+        applyTurnScores(game, room.players, submittedAt);
+      }
+
       return {
         room: this.roomManager.getPublicRoomState(room.code),
         guess: {
@@ -626,6 +1046,11 @@ export class GameManager {
       delete game.currentTurn.guesses[requester.id];
       game.phase = previousPhase;
       game.phaseEndsAt = previousPhaseEndsAt;
+      game.currentTurn.scoresAppliedAt = previousScoresAppliedAt;
+      game.currentTurn.scoreResult = previousScoreResult;
+      room.players.forEach((player, index) => {
+        player.score = previousScores[index] ?? 0;
+      });
 
       if (error instanceof RoomManagerError) {
         throw error;
@@ -634,6 +1059,173 @@ export class GameManager {
       throw new RoomManagerError(
         "INTERNAL_ERROR",
         "Impossible de publier l’estimation.",
+      );
+    }
+  }
+
+  continueGame(socketId: string): ContinueGameInternalResult {
+    const room = this.roomManager.getPlayerRoomBySocketId(socketId);
+    if (room === undefined) {
+      throw new RoomManagerError(
+        "NOT_IN_ROOM",
+        "Cette connexion n'appartient à aucun salon.",
+      );
+    }
+
+    const game = room.game;
+    if (game === null) {
+      throw new RoomManagerError(
+        "GAME_NOT_STARTED",
+        "Aucune partie n’est en cours.",
+      );
+    }
+
+    const requester = room.players.find(
+      (player) => player.socketId === socketId,
+    );
+    if (requester === undefined) {
+      throw new RoomManagerError(
+        "PLAYER_NOT_FOUND",
+        "Le joueur associé à cette connexion est introuvable.",
+      );
+    }
+
+    if (!requester.isHost) {
+      throw new RoomManagerError(
+        "NOT_HOST",
+        "Seul l’hôte peut lancer le tour suivant.",
+      );
+    }
+
+    if (game.phase === "FINISHED") {
+      throw new RoomManagerError(
+        "GAME_ALREADY_FINISHED",
+        "La partie est terminée.",
+      );
+    }
+
+    if (game.phase !== "REVEAL") {
+      throw new RoomManagerError(
+        "NOT_REVEAL_PHASE",
+        "Le tour suivant ne peut pas encore commencer.",
+      );
+    }
+
+    const eligibleVoterIds = getEligibleVoterIds(game, room.players);
+    if (
+      !areAllGuessesSubmitted(game, eligibleVoterIds) ||
+      game.currentTurn.scoresAppliedAt === null ||
+      game.currentTurn.scoreResult === null
+    ) {
+      throw new RoomManagerError(
+        "INTERNAL_ERROR",
+        "Le tour actuel n’est pas prêt à être poursuivi.",
+      );
+    }
+
+    const nextPosition = getNextTurnPosition(game);
+    if (nextPosition === null) {
+      const previousPhase = game.phase;
+      const previousPhaseEndsAt = game.phaseEndsAt;
+      game.phase = "FINISHED";
+      game.phaseEndsAt = null;
+
+      try {
+        return {
+          room: this.roomManager.getPublicRoomState(room.code),
+        };
+      } catch (error) {
+        game.phase = previousPhase;
+        game.phaseEndsAt = previousPhaseEndsAt;
+
+        if (error instanceof RoomManagerError) {
+          throw error;
+        }
+
+        throw new RoomManagerError(
+          "INTERNAL_ERROR",
+          "Impossible de terminer la partie.",
+        );
+      }
+    }
+
+    const nextDrawerPlayerId =
+      game.turnOrder[nextPosition.currentDrawerIndex];
+    const nextDrawer = room.players.find(
+      (player) => player.id === nextDrawerPlayerId,
+    );
+    if (nextDrawer === undefined) {
+      throw new RoomManagerError(
+        "INTERNAL_ERROR",
+        "Le prochain dessinateur est introuvable.",
+      );
+    }
+
+    const nextTurn = this.prepareTurn(
+      nextDrawer.id,
+      game.usedPromptIds,
+      game.usedTurnIds,
+    );
+    const introStartedAt = this.clock();
+    if (!Number.isFinite(introStartedAt)) {
+      throw new RoomManagerError(
+        "INTERNAL_ERROR",
+        "Impossible de dater le tour suivant.",
+      );
+    }
+
+    const previousPhase = game.phase;
+    const previousPhaseEndsAt = game.phaseEndsAt;
+    const previousRound = game.currentRound;
+    const previousDrawerIndex = game.currentDrawerIndex;
+    const previousTurn = game.currentTurn;
+    const previousUsedPromptIds = [...game.usedPromptIds];
+    const previousUsedTurnIds = [...game.usedTurnIds];
+
+    game.phase = "ROUND_INTRO";
+    game.phaseEndsAt = introStartedAt + this.introDurationMs;
+    game.currentRound = nextPosition.currentRound;
+    game.currentDrawerIndex = nextPosition.currentDrawerIndex;
+    game.currentTurn = nextTurn;
+    game.usedPromptIds = [
+      ...previousUsedPromptIds,
+      nextTurn.prompt.id,
+    ];
+    game.usedTurnIds = [...previousUsedTurnIds, nextTurn.turnId];
+
+    try {
+      this.scheduleDrawingTransition(room.code, game);
+      const publicRoom = this.roomManager.getPublicRoomState(room.code);
+
+      return {
+        room: publicRoom,
+        nextTurn: {
+          drawerSocketId: nextDrawer.socketId,
+          secret: {
+            roomCode: room.code,
+            turnId: nextTurn.turnId,
+            drawerPlayerId: nextDrawer.id,
+            secretLevel: nextTurn.secretLevel,
+          },
+        },
+      };
+    } catch (error) {
+      this.clearScheduledTransition(room.code);
+      game.phase = previousPhase;
+      game.phaseEndsAt = previousPhaseEndsAt;
+      game.currentRound = previousRound;
+      game.currentDrawerIndex = previousDrawerIndex;
+      game.currentTurn = previousTurn;
+      game.usedPromptIds = previousUsedPromptIds;
+      game.usedTurnIds = previousUsedTurnIds;
+
+      if (error instanceof RoomManagerError) {
+        throw error;
+      }
+
+      throw new RoomManagerError(
+        "INTERNAL_ERROR",
+        "Impossible de préparer le tour suivant.",
       );
     }
   }
@@ -649,6 +1241,7 @@ export class GameManager {
     room.game = null;
     for (const player of room.players) {
       player.isReady = false;
+      player.score = 0;
     }
 
     return true;
@@ -659,6 +1252,65 @@ export class GameManager {
       this.clearTimer(timer);
     }
     this.phaseTimers.clear();
+  }
+
+  private prepareTurn(
+    drawerPlayerId: string,
+    usedPromptIds: readonly string[],
+    usedTurnIds: readonly string[],
+  ): InternalTurn {
+    const usedPromptIdSet = new Set(usedPromptIds);
+    const availablePrompts = this.prompts.filter(
+      (prompt) => !usedPromptIdSet.has(prompt.id),
+    );
+
+    if (availablePrompts.length === 0) {
+      throw new RoomManagerError(
+        "INTERNAL_ERROR",
+        "Aucune consigne inédite n’est disponible.",
+      );
+    }
+
+    let selectedPromptCandidate: DrawingPrompt;
+    let secretLevel: number;
+    let turnId: string;
+
+    try {
+      selectedPromptCandidate = this.choosePrompt(availablePrompts);
+      secretLevel = this.createSecretLevel();
+      turnId = this.createTurnId();
+    } catch {
+      throw new RoomManagerError(
+        "INTERNAL_ERROR",
+        "Impossible de préparer les données du tour.",
+      );
+    }
+
+    const selectedPrompt = availablePrompts.find(
+      (prompt) => prompt.id === selectedPromptCandidate.id,
+    );
+    if (selectedPrompt === undefined) {
+      throw new RoomManagerError(
+        "INTERNAL_ERROR",
+        "Impossible de sélectionner une consigne inédite valide.",
+      );
+    }
+
+    validateSecretLevel(secretLevel);
+    validateTurnId(turnId);
+    if (new Set(usedTurnIds).has(turnId)) {
+      throw new RoomManagerError(
+        "INTERNAL_ERROR",
+        "Le nouvel identifiant de tour doit être unique.",
+      );
+    }
+
+    return initializeTurn(
+      turnId,
+      drawerPlayerId,
+      selectedPrompt,
+      secretLevel,
+    );
   }
 
   private scheduleDrawingTransition(

@@ -14,6 +14,7 @@ export interface InternalPlayer {
   isHost: boolean;
   isReady: boolean;
   joinedAt: number;
+  score: number;
 }
 
 export interface InternalRoom {

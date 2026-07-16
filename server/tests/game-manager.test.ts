@@ -92,6 +92,7 @@ function createDeterministicGameManager(
 
       return prompt;
     },
+    generateTurnId: () => "turn-1",
     generateSecretLevel: () => 7,
     scheduleTimer: () => Symbol("phase-timer"),
     clearTimer: () => undefined,
@@ -193,6 +194,7 @@ describe("GameManager", () => {
     expect(result.drawerSocketId).toBe(preparedRoom.socketIds[2]);
     expect(result.secret).toEqual({
       roomCode: preparedRoom.roomCode,
+      turnId: "turn-1",
       drawerPlayerId: preparedRoom.playerIds[2],
       secretLevel: 7,
     });

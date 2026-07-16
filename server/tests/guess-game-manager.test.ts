@@ -175,6 +175,37 @@ function getPublicGame(harness: VotingGameHarness): PublicGameState {
   return game;
 }
 
+function createGuessPayload(harness: VotingGameHarness, value: number) {
+  return {
+    turnId: getInternalGame(harness).currentTurn.turnId,
+    value,
+  };
+}
+
+const INVALID_GUESS_PAYLOADS: Array<
+  [label: string, createPayload: (turnId: string) => unknown]
+> = [
+  ["zéro", (turnId) => ({ turnId, value: 0 })],
+  ["onze", (turnId) => ({ turnId, value: 11 })],
+  ["un décimal", (turnId) => ({ turnId, value: 5.5 })],
+  ["NaN", (turnId) => ({ turnId, value: Number.NaN })],
+  ["Infinity", (turnId) => ({ turnId, value: Number.POSITIVE_INFINITY })],
+  ["une chaîne", (turnId) => ({ turnId, value: "5" })],
+  ["un turnId absent", () => ({ value: 5 })],
+  ["un turnId vide", () => ({ turnId: "", value: 5 })],
+  ["un turnId entouré d'espaces", () => ({ turnId: " turn-1 ", value: 5 })],
+  ["un turnId non textuel", () => ({ turnId: 1, value: 5 })],
+  ["null", () => null],
+  ["un payload absent", () => undefined],
+  ["un tableau", (turnId) => [{ turnId, value: 5 }]],
+  [
+    "une propriété supplémentaire",
+    (turnId) => ({ turnId, value: 5, playerId: "player-2" }),
+  ],
+  ["un objet Date", () => new Date()],
+  ["une valeur imbriquée", (turnId) => ({ turnId, value: { nested: 5 } })],
+];
+
 function expectRoomError(
   action: () => unknown,
   expectedCode: RoomManagerError["code"],
@@ -244,8 +275,14 @@ describe("GameManager authoritative guesses", () => {
     );
 
     const harness = prepareVotingGame();
-    harness.gameManager.submitGuess(harness.socketIds[1]!, { value: 5 });
-    harness.gameManager.submitGuess(harness.socketIds[2]!, { value: 7 });
+    harness.gameManager.submitGuess(
+      harness.socketIds[1]!,
+      createGuessPayload(harness, 5),
+    );
+    harness.gameManager.submitGuess(
+      harness.socketIds[2]!,
+      createGuessPayload(harness, 7),
+    );
 
     expect(getInternalGame(harness).phase).toBe("REVEAL");
     expectRoomError(
@@ -272,7 +309,11 @@ describe("GameManager authoritative guesses", () => {
     const harness = prepareVotingGame();
 
     expectRoomError(
-      () => harness.gameManager.submitGuess(harness.socketIds[0]!, { value: 7 }),
+      () =>
+        harness.gameManager.submitGuess(
+          harness.socketIds[0]!,
+          createGuessPayload(harness, 7),
+        ),
       "DRAWER_CANNOT_GUESS",
     );
     expect(getInternalGame(harness).currentTurn.guesses).toEqual({});
@@ -286,33 +327,56 @@ describe("GameManager authoritative guesses", () => {
     );
 
     expectRoomError(
-      () => harness.gameManager.submitGuess(harness.socketIds[1]!, { value: 5 }),
+      () =>
+        harness.gameManager.submitGuess(
+          harness.socketIds[1]!,
+          createGuessPayload(harness, 5),
+        ),
       "PLAYER_NOT_ELIGIBLE",
     );
   });
 
-  it.each([
-    ["zéro", { value: 0 }],
-    ["onze", { value: 11 }],
-    ["un décimal", { value: 5.5 }],
-    ["NaN", { value: Number.NaN }],
-    ["Infinity", { value: Number.POSITIVE_INFINITY }],
-    ["une chaîne", { value: "5" }],
-    ["null", null],
-    ["un payload absent", undefined],
-    ["un tableau", [{ value: 5 }]],
-    ["une propriété supplémentaire", { value: 5, playerId: "player-2" }],
-    ["un objet Date", new Date()],
-    ["une valeur imbriquée", { value: { nested: 5 } }],
-  ])("refuse %s sans stocker d'estimation", (_label, payload) => {
+  it.each(INVALID_GUESS_PAYLOADS)(
+    "refuse %s sans stocker d'estimation",
+    (_label, createPayload) => {
+      const harness = prepareVotingGame();
+      const payload = createPayload(getInternalGame(harness).currentTurn.turnId);
+
+      expectRoomError(
+        () => harness.gameManager.submitGuess(harness.socketIds[1]!, payload),
+        "INVALID_GUESS",
+      );
+      expect(getInternalGame(harness).currentTurn.guesses).toEqual({});
+      expect(getPublicGame(harness).voting?.submittedGuessCount).toBe(0);
+    },
+  );
+
+  it("refuse une estimation liée à un ancien tour sans modifier le vote ni les scores", () => {
     const harness = prepareVotingGame();
+    const game = getInternalGame(harness);
+    const scoresBefore = harness.roomManager
+      .getRoomByCode(harness.roomCode)
+      ?.players.map((player) => player.score);
 
     expectRoomError(
-      () => harness.gameManager.submitGuess(harness.socketIds[1]!, payload),
-      "INVALID_GUESS",
+      () =>
+        harness.gameManager.submitGuess(harness.socketIds[1]!, {
+          turnId: "ancien-tour",
+          value: 5,
+        }),
+      "STALE_TURN",
     );
-    expect(getInternalGame(harness).currentTurn.guesses).toEqual({});
+
+    expect(game.phase).toBe("VOTING");
+    expect(game.currentTurn.guesses).toEqual({});
+    expect(game.currentTurn.scoresAppliedAt).toBeNull();
+    expect(game.currentTurn.scoreResult).toBeNull();
     expect(getPublicGame(harness).voting?.submittedGuessCount).toBe(0);
+    expect(
+      harness.roomManager
+        .getRoomByCode(harness.roomCode)
+        ?.players.map((player) => player.score),
+    ).toEqual(scoresBefore);
   });
 
   it("refuse proprement un payload dont l'introspection lève une erreur", () => {
@@ -339,7 +403,7 @@ describe("GameManager authoritative guesses", () => {
 
   it("stocke une estimation valide et sa date sans l'exposer pendant VOTING", () => {
     const harness = prepareVotingGame();
-    const payload = { value: 5 };
+    const payload = createGuessPayload(harness, 5);
     harness.setTime(30_000);
 
     const result = harness.gameManager.submitGuess(
@@ -347,6 +411,7 @@ describe("GameManager authoritative guesses", () => {
       payload,
     );
     payload.value = 9;
+    payload.turnId = "ancien-tour";
 
     const internalGuess =
       getInternalGame(harness).currentTurn.guesses[harness.playerIds[1]!];
@@ -384,10 +449,17 @@ describe("GameManager authoritative guesses", () => {
 
   it("refuse définitivement une seconde estimation avant de valider son payload", () => {
     const harness = prepareVotingGame();
-    harness.gameManager.submitGuess(harness.socketIds[1]!, { value: 5 });
+    harness.gameManager.submitGuess(
+      harness.socketIds[1]!,
+      createGuessPayload(harness, 5),
+    );
 
     expectRoomError(
-      () => harness.gameManager.submitGuess(harness.socketIds[1]!, { value: 0 }),
+      () =>
+        harness.gameManager.submitGuess(
+          harness.socketIds[1]!,
+          createGuessPayload(harness, 0),
+        ),
       "GUESS_ALREADY_SUBMITTED",
     );
     expect(
@@ -401,10 +473,12 @@ describe("GameManager authoritative guesses", () => {
 
     harness.setTime(30_001);
     const first = harness.gameManager.submitGuess(harness.socketIds[3]!, {
+      turnId: getInternalGame(harness).currentTurn.turnId,
       value: 10,
     });
     harness.setTime(30_002);
     const second = harness.gameManager.submitGuess(harness.socketIds[1]!, {
+      turnId: getInternalGame(harness).currentTurn.turnId,
       value: 5,
     });
 
@@ -423,6 +497,7 @@ describe("GameManager authoritative guesses", () => {
 
     harness.setTime(30_003);
     const last = harness.gameManager.submitGuess(harness.socketIds[2]!, {
+      turnId: getInternalGame(harness).currentTurn.turnId,
       value: 7,
     });
 
@@ -475,8 +550,12 @@ describe("GameManager authoritative guesses", () => {
 
   it("ne laisse pas une mutation de la révélation publique modifier les votes internes", () => {
     const harness = prepareVotingGame();
-    harness.gameManager.submitGuess(harness.socketIds[1]!, { value: 5 });
+    harness.gameManager.submitGuess(
+      harness.socketIds[1]!,
+      createGuessPayload(harness, 5),
+    );
     const revealed = harness.gameManager.submitGuess(harness.socketIds[2]!, {
+      turnId: getInternalGame(harness).currentTurn.turnId,
       value: 9,
     });
     const firstPublicGuess = revealed.room.game?.reveal?.guesses[0];
@@ -492,6 +571,8 @@ describe("GameManager authoritative guesses", () => {
       player: { id: harness.playerIds[1], nickname: "J2" },
       value: 5,
       distance: 2,
+      pointsEarned: 3,
+      totalScore: 3,
     });
     expect(
       getInternalGame(harness).currentTurn.guesses[harness.playerIds[1]!]
@@ -504,7 +585,11 @@ describe("GameManager authoritative guesses", () => {
     harness.setTime(Number.POSITIVE_INFINITY);
 
     expectRoomError(
-      () => harness.gameManager.submitGuess(harness.socketIds[1]!, { value: 5 }),
+      () =>
+        harness.gameManager.submitGuess(
+          harness.socketIds[1]!,
+          createGuessPayload(harness, 5),
+        ),
       "INTERNAL_ERROR",
     );
     expect(getInternalGame(harness).phase).toBe("VOTING");
@@ -517,7 +602,11 @@ describe("GameManager authoritative guesses", () => {
     game.currentTurn.drawing = null;
 
     expectRoomError(
-      () => harness.gameManager.submitGuess(harness.socketIds[1]!, { value: 5 }),
+      () =>
+        harness.gameManager.submitGuess(
+          harness.socketIds[1]!,
+          createGuessPayload(harness, 5),
+        ),
       "INTERNAL_ERROR",
     );
     expect(game.phase).toBe("VOTING");
@@ -526,7 +615,10 @@ describe("GameManager authoritative guesses", () => {
 
   it("supprime les estimations internes et publiques lors d'une annulation", () => {
     const harness = prepareVotingGame();
-    harness.gameManager.submitGuess(harness.socketIds[1]!, { value: 5 });
+    harness.gameManager.submitGuess(
+      harness.socketIds[1]!,
+      createGuessPayload(harness, 5),
+    );
     expect(getInternalGame(harness).currentTurn.guesses).not.toEqual({});
 
     expect(harness.gameManager.cancelGame(harness.roomCode)).toBe(true);
@@ -541,8 +633,14 @@ describe("GameManager authoritative guesses", () => {
 
   it("annule aussi proprement une partie déjà passée en REVEAL", () => {
     const harness = prepareVotingGame();
-    harness.gameManager.submitGuess(harness.socketIds[1]!, { value: 5 });
-    harness.gameManager.submitGuess(harness.socketIds[2]!, { value: 9 });
+    harness.gameManager.submitGuess(
+      harness.socketIds[1]!,
+      createGuessPayload(harness, 5),
+    );
+    harness.gameManager.submitGuess(
+      harness.socketIds[2]!,
+      createGuessPayload(harness, 9),
+    );
     expect(getInternalGame(harness).phase).toBe("REVEAL");
 
     expect(harness.gameManager.cancelGame(harness.roomCode)).toBe(true);

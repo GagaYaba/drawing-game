@@ -61,6 +61,7 @@ describe("RoomManager", () => {
             nickname: "Romane",
             isHost: true,
             isReady: false,
+            score: 0,
           },
         ],
         playerCount: 1,

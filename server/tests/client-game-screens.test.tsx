@@ -8,6 +8,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { DrawingScreen } from "../../client/src/components/DrawingScreen.js";
+import { FinishedScreen } from "../../client/src/components/FinishedScreen.js";
 import { RevealScreen } from "../../client/src/components/RevealScreen.js";
 import { RoundIntroScreen } from "../../client/src/components/RoundIntroScreen.js";
 import { VotingScreen } from "../../client/src/components/VotingScreen.js";
@@ -34,6 +35,7 @@ function createGame(
 ): PublicGameState {
   return {
     phase,
+    turnId: "turn-1",
     totalRounds: 2,
     currentRound: 1,
     currentTurnNumber: 1,
@@ -72,6 +74,8 @@ function createGame(
                 },
                 value: SECRET_LEVEL,
                 distance: 0,
+                pointsEarned: 3,
+                totalScore: 8,
               },
               {
                 player: {
@@ -80,8 +84,89 @@ function createGame(
                 },
                 value: 4,
                 distance: 3,
+                pointsEarned: 0,
+                totalScore: 1,
               },
             ],
+            drawerResult: {
+              player: {
+                id: DRAWER_ID,
+                nickname: "Camille",
+              },
+              closeGuessCount: 1,
+              pointsEarned: 2,
+              totalScore: 5,
+            },
+            leaderboard: [
+              {
+                rank: 1,
+                player: {
+                  id: OBSERVER_ID,
+                  nickname: "Élodie",
+                },
+                score: 8,
+              },
+              {
+                rank: 2,
+                player: {
+                  id: DRAWER_ID,
+                  nickname: "Camille",
+                },
+                score: 5,
+              },
+              {
+                rank: 3,
+                player: {
+                  id: "second-observer-id",
+                  nickname: "Noé",
+                },
+                score: 1,
+              },
+            ],
+            nextDrawer: {
+              id: OBSERVER_ID,
+              nickname: "Élodie",
+            },
+          }
+        : null,
+    finished:
+      phase === "FINISHED"
+        ? {
+            leaderboard: [
+              {
+                rank: 1,
+                player: {
+                  id: OBSERVER_ID,
+                  nickname: "Élodie",
+                },
+                score: 12,
+              },
+              {
+                rank: 2,
+                player: {
+                  id: DRAWER_ID,
+                  nickname: "Camille",
+                },
+                score: 9,
+              },
+              {
+                rank: 3,
+                player: {
+                  id: "second-observer-id",
+                  nickname: "Noé",
+                },
+                score: 4,
+              },
+            ],
+            winners: [
+              {
+                id: OBSERVER_ID,
+                nickname: "Élodie",
+                score: 12,
+              },
+            ],
+            completedRounds: 2,
+            completedTurns: 6,
           }
         : null,
   };
@@ -108,6 +193,10 @@ const commonProps = {
 const votingCallbacks = {
   onSelectGuess: () => undefined,
   onSubmitGuess: () => false,
+} as const;
+
+const revealCallbacks = {
+  onContinueGame: () => false,
 } as const;
 
 function expectPublicGaugeWithoutSecret(markup: string): void {
@@ -233,7 +322,10 @@ describe("compact game phase structure", () => {
     const revealMarkup = renderToStaticMarkup(
       <RevealScreen
         {...commonProps}
+        {...revealCallbacks}
         game={createGame("REVEAL")}
+        currentPlayerId={OBSERVER_ID}
+        isHost={false}
       />,
     );
 
@@ -560,11 +652,14 @@ describe("VotingScreen", () => {
 });
 
 describe("RevealScreen", () => {
-  it("révèle le secret et toutes les estimations dans l'ordre stable du salon", () => {
+  it("révèle le secret, les points et le classement dans l'ordre public", () => {
     const markup = renderToStaticMarkup(
       <RevealScreen
         {...commonProps}
+        {...revealCallbacks}
         game={createGame("REVEAL")}
+        currentPlayerId={OBSERVER_ID}
+        isHost={false}
       />,
     );
     const text = getVisibleText(markup);
@@ -576,24 +671,186 @@ describe("RevealScreen", () => {
     expect(markup).toContain("drawing-preview-canvas");
     expect(markup).toContain('class="scale-gauge__marker"');
     expect(markup).toContain("<strong>7</strong>");
-    expect(text).toContain("Élodie 7 / 10 Exact !");
-    expect(text).toContain("Noé 4 / 10 Écart : 3");
+    expect(text).toContain("Élodie 7 / 10 Exact ! +3 points Total : 8 points");
+    expect(text).toContain("Noé 4 / 10 Écart : 3 +0 points Total : 1 point");
+    expect(text).toContain(
+      "1 joueur a trouvé le niveau de Camille à ±1. Camille gagne 2 points.",
+    );
+    expect(text).toContain("Classement");
+    expect(text).toContain("1 Élodie Vous 8 points");
+    expect(text).toContain("2 Camille 5 points");
     expect(markup.indexOf("Élodie")).toBeLessThan(markup.indexOf("Noé"));
+    expect(text).toContain("En attente de l’hôte pour continuer…");
+    expect(markup).not.toContain("reveal-continue-button");
   });
 
-  it("reste une révélation terminale sans score ni action de tour suivant", () => {
+  it("adresse le résultat au dessinateur et réserve la continuation à l'hôte", () => {
     const markup = renderToStaticMarkup(
       <RevealScreen
         {...commonProps}
+        {...revealCallbacks}
         game={createGame("REVEAL")}
+        currentPlayerId={DRAWER_ID}
+        isHost
       />,
     );
-    const normalizedMarkup = markup.toLocaleLowerCase("fr");
+    const text = getVisibleText(markup);
 
-    expect(normalizedMarkup).not.toContain("score");
-    expect(normalizedMarkup).not.toContain("point");
-    expect(normalizedMarkup).not.toContain("continuer");
-    expect(markup).not.toContain("Prochain tour");
-    expect(markup).toContain("Quitter la partie");
+    expect(text).toContain(
+      "1 joueur a trouvé votre niveau à ±1. Vous gagnez 2 points.",
+    );
+    expect(text).toContain("Élodie dessinera au prochain tour.");
+    expect(markup).toContain("reveal-continue-button");
+    expect(text).toContain("Lancer le prochain tour");
+    expect(text).not.toContain("En attente de l’hôte");
+    expect(markup.indexOf("reveal-sidebar__content")).toBeLessThan(
+      markup.indexOf("reveal-continuation"),
+    );
+    expect(markup.indexOf("reveal-continuation")).toBeLessThan(
+      markup.indexOf("game-sidebar-leave"),
+    );
+  });
+
+  it("propose d'afficher le classement final après le dernier tour", () => {
+    const game = createGame("REVEAL");
+    if (game.reveal === null) {
+      throw new Error("Une révélation était attendue.");
+    }
+    game.reveal.nextDrawer = null;
+
+    const markup = renderToStaticMarkup(
+      <RevealScreen
+        {...commonProps}
+        {...revealCallbacks}
+        game={game}
+        currentPlayerId={DRAWER_ID}
+        isHost
+      />,
+    );
+    const text = getVisibleText(markup);
+
+    expect(text).toContain("Tous les tours sont terminés.");
+    expect(text).toContain("Voir le classement final");
+    expect(markup).toContain("reveal-continue-button");
+  });
+
+  it("bloque les actions pendant la préparation du tour suivant", () => {
+    const markup = renderToStaticMarkup(
+      <RevealScreen
+        {...commonProps}
+        {...revealCallbacks}
+        game={createGame("REVEAL")}
+        currentPlayerId={DRAWER_ID}
+        isHost
+        pendingAction="continue"
+      />,
+    );
+
+    expect(markup).toContain('aria-busy="true"');
+    expect(markup).toContain(
+      'class="button button--primary reveal-continue-button" type="button" disabled=""',
+    );
+    expect(getVisibleText(markup)).toContain("Préparation…");
+  });
+
+  it("conserve l'action visible lorsqu'une erreur de continuation est affichée", () => {
+    const markup = renderToStaticMarkup(
+      <RevealScreen
+        {...commonProps}
+        {...revealCallbacks}
+        game={createGame("REVEAL")}
+        currentPlayerId={DRAWER_ID}
+        isHost
+        errorMessage="Le serveur a refusé la continuation."
+      />,
+    );
+
+    expect(markup).toContain('role="alert"');
+    expect(getVisibleText(markup)).toContain(
+      "Le serveur a refusé la continuation.",
+    );
+    expect(markup).toContain("reveal-continue-button");
+    expect(getVisibleText(markup)).toContain("Lancer le prochain tour");
+  });
+});
+
+describe("FinishedScreen", () => {
+  it("annonce le gagnant et affiche uniquement le classement final", () => {
+    const finished = createGame("FINISHED").finished;
+    if (finished === null) {
+      throw new Error("Un état final était attendu.");
+    }
+
+    const markup = renderToStaticMarkup(
+      <FinishedScreen
+        {...commonProps}
+        finished={finished}
+        currentPlayerId={OBSERVER_ID}
+      />,
+    );
+    const text = getVisibleText(markup);
+
+    expect(markup).toContain(
+      'class="game-card game-phase game-phase-layout finished-screen"',
+    );
+    expect(markup).toContain('aria-live="polite"');
+    expect(text).toContain("Élodie remporte la partie avec 12 points.");
+    expect(text).toContain("2 manches · 6 tours joués");
+    expect(text).toContain("Classement final");
+    expect(text).toContain("1 Élodie Vous 12 points");
+    expect(text).toContain("2 Camille 9 points");
+    expect(text).not.toContain(PROMPT_STATEMENT);
+    expect(text).not.toContain("Niveau secret");
+    expect(text).not.toContain("Lancer le prochain tour");
+  });
+
+  it("annonce correctement une égalité entre plusieurs gagnants", () => {
+    const finished = createGame("FINISHED").finished;
+    if (finished === null) {
+      throw new Error("Un état final était attendu.");
+    }
+    finished.winners = [
+      { id: OBSERVER_ID, nickname: "Élodie", score: 12 },
+      { id: DRAWER_ID, nickname: "Camille", score: 12 },
+    ];
+
+    const markup = renderToStaticMarkup(
+      <FinishedScreen
+        {...commonProps}
+        finished={finished}
+        currentPlayerId={DRAWER_ID}
+      />,
+    );
+    const text = getVisibleText(markup);
+
+    expect(text).toContain(
+      "Élodie et Camille remportent la partie avec 12 points.",
+    );
+    expect(text).toContain("Gagnants");
+    expect(text).toContain("Une première place partagée");
+  });
+
+  it("résume une égalité large sans énumération interminable", () => {
+    const finished = createGame("FINISHED").finished;
+    if (finished === null) {
+      throw new Error("Un état final était attendu.");
+    }
+    finished.winners = [
+      { id: OBSERVER_ID, nickname: "Élodie", score: 12 },
+      { id: DRAWER_ID, nickname: "Camille", score: 12 },
+      { id: "second-observer-id", nickname: "Noé", score: 12 },
+    ];
+
+    const markup = renderToStaticMarkup(
+      <FinishedScreen
+        {...commonProps}
+        finished={finished}
+        currentPlayerId={OBSERVER_ID}
+      />,
+    );
+
+    expect(getVisibleText(markup)).toContain(
+      "3 joueurs terminent à égalité avec 12 points.",
+    );
   });
 });

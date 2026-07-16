@@ -12,6 +12,7 @@ const DRAWER: InternalPlayer = {
   isHost: true,
   isReady: true,
   joinedAt: 1_000,
+  score: 0,
 };
 
 function createGame(prompt: DrawingPrompt): InternalGame {
@@ -22,13 +23,18 @@ function createGame(prompt: DrawingPrompt): InternalGame {
     turnOrder: [DRAWER.id],
     currentDrawerIndex: 0,
     currentTurn: {
+      turnId: "turn-1",
       drawerPlayerId: DRAWER.id,
       prompt,
       secretLevel: 7,
       drawing: null,
       drawingSubmittedAt: null,
       guesses: {},
+      scoresAppliedAt: null,
+      scoreResult: null,
     },
+    usedPromptIds: [prompt.id],
+    usedTurnIds: ["turn-1"],
     startedAt: 2_000,
     phaseEndsAt: null,
   };

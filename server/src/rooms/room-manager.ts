@@ -277,6 +277,7 @@ export class RoomManager {
       isHost,
       isReady: false,
       joinedAt,
+      score: 0,
     };
   }
 
@@ -371,6 +372,7 @@ export class RoomManager {
       nickname: player.nickname,
       isHost: player.isHost,
       isReady: player.isReady,
+      score: player.score,
     }));
     const allPlayersReady =
       players.length > 0 && players.every((player) => player.isReady);

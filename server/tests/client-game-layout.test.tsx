@@ -1,17 +1,26 @@
+import { readFileSync } from "node:fs";
+
 import type { PublicGameState } from "@drawing-game/shared";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { AppLayout } from "../../client/src/App.js";
+import { GameLeaderboard } from "../../client/src/components/game/GameLeaderboard.js";
 import {
   GamePromptHeader,
   GamePromptValue,
 } from "../../client/src/components/game/GamePromptHeader.js";
 import { GameStatusPanel } from "../../client/src/components/game/GameStatusPanel.js";
 
+const GLOBAL_STYLES = readFileSync(
+  new URL("../../client/src/styles/global.css", import.meta.url),
+  "utf8",
+);
+
 function createGame(drawerNickname = "Camille"): PublicGameState {
   return {
     phase: "DRAWING",
+    turnId: "turn-1",
     totalRounds: 2,
     currentRound: 1,
     currentTurnNumber: 1,
@@ -31,6 +40,7 @@ function createGame(drawerNickname = "Camille"): PublicGameState {
     submittedDrawing: null,
     voting: null,
     reveal: null,
+    finished: null,
   };
 }
 
@@ -73,6 +83,24 @@ describe("AppLayout", () => {
     expect(markup).toContain("Diagnostic technique");
     expect(markup).not.toContain("<footer>");
   });
+
+  it("verrouille le scroll de page sur desktop et le rétablit sur mobile", () => {
+    expect(GLOBAL_STYLES).toMatch(
+      /@media \(min-width: 900px\)[\s\S]*?\.app-shell--active\s*\{[\s\S]*?height: 100vh;[\s\S]*?overflow: hidden;/,
+    );
+    expect(GLOBAL_STYLES).toMatch(
+      /@media \(max-width: 899px\)[\s\S]*?\.app-shell--active\s*\{[\s\S]*?height: auto;[\s\S]*?overflow: visible;/,
+    );
+    expect(GLOBAL_STYLES).toMatch(
+      /\.game-phase-layout__sidebar\.reveal-sidebar\s*\{[\s\S]*?overflow: hidden;/,
+    );
+    expect(GLOBAL_STYLES).toMatch(
+      /\.reveal-sidebar__content\s*\{[\s\S]*?overflow-y: auto;/,
+    );
+    expect(GLOBAL_STYLES).toMatch(
+      /\.reveal-sidebar__content\s*\{[\s\S]*?grid-auto-rows: max-content;[\s\S]*?align-content: start;/,
+    );
+  });
 });
 
 describe("GameStatusPanel", () => {
@@ -91,6 +119,39 @@ describe("GameStatusPanel", () => {
     expect(markup).toContain(
       `<dd class="game-status-panel__drawer" title="${drawerNickname}">${drawerNickname}</dd>`,
     );
+  });
+});
+
+describe("GameLeaderboard", () => {
+  it("affiche les rangs, les scores et identifie le joueur courant", () => {
+    const markup = renderToStaticMarkup(
+      <GameLeaderboard
+        entries={[
+          {
+            rank: 1,
+            player: { id: "player-1", nickname: "Élodie" },
+            score: 12,
+          },
+          {
+            rank: 2,
+            player: { id: "player-2", nickname: "Camille" },
+            score: 1,
+          },
+        ]}
+        currentPlayerId="player-2"
+      />,
+    );
+
+    expect(markup).toContain('aria-label="Classement de la partie"');
+    expect(markup).toContain('aria-label="Rang 1">1</span>');
+    expect(markup).toContain("Élodie");
+    expect(markup).toContain("12 points");
+    expect(markup).toContain(
+      'class="game-leaderboard__entry game-leaderboard__entry--current"',
+    );
+    expect(markup).toContain("Camille");
+    expect(markup).toContain("1 point");
+    expect(markup).toContain("Vous");
   });
 });
 

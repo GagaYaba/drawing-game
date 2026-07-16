@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 
 import { ConnectionPanel } from "./components/ConnectionPanel";
 import { DrawingScreen } from "./components/DrawingScreen";
+import { FinishedScreen } from "./components/FinishedScreen";
 import { HealthCheck } from "./components/HealthCheck";
 import { HomeScreen } from "./components/HomeScreen";
 import { LobbyScreen } from "./components/LobbyScreen";
@@ -65,8 +66,12 @@ export function App() {
   const currentPlayerId = roomSession.session.currentPlayerId;
   const game = room?.game ?? null;
   const isGameActive = game !== null && game.phase !== "LOBBY";
+  const currentPlayer =
+    room?.players.find((player) => player.id === currentPlayerId) ?? null;
   const currentPlayerSecret =
-    game !== null && game.currentDrawer.id === currentPlayerId
+    game !== null &&
+    game.currentDrawer.id === currentPlayerId &&
+    roomSession.gameSecrets.turnId === game.turnId
       ? roomSession.gameSecrets.secretLevel
       : null;
 
@@ -125,9 +130,20 @@ export function App() {
           onSubmitGuess={roomSession.submitGuess}
           onLeaveRoom={roomSession.leaveRoom}
         />
-      ) : (
+      ) : game.phase === "REVEAL" ? (
         <RevealScreen
           game={game}
+          currentPlayerId={currentPlayerId}
+          isHost={currentPlayer?.isHost ?? false}
+          pendingAction={roomSession.pendingAction}
+          errorMessage={roomSession.errorMessage}
+          onContinueGame={roomSession.continueGame}
+          onLeaveRoom={roomSession.leaveRoom}
+        />
+      ) : (
+        <FinishedScreen
+          finished={game.finished}
+          currentPlayerId={currentPlayerId}
           pendingAction={roomSession.pendingAction}
           errorMessage={roomSession.errorMessage}
           onLeaveRoom={roomSession.leaveRoom}

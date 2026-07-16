@@ -4,6 +4,7 @@ import {
   type ActionResult,
   type ClientPingPayload,
   type ClientToServerEvents,
+  type ContinueGameSuccessData,
   type PublicRoomState,
   type RoomSessionData,
   type ServerToClientEvents,
@@ -264,6 +265,52 @@ export function registerSocketHandlers(
         request.acknowledge(actionFailure(error));
       }
     });
+
+    socket.on(
+      SOCKET_EVENTS.GAME_CONTINUE,
+      (...argumentsReceived: unknown[]) => {
+        const request = getActionRequest<ContinueGameSuccessData>(
+          argumentsReceived,
+        );
+        if (request === null) {
+          return;
+        }
+
+        if (request.payload !== undefined) {
+          request.acknowledge({
+            success: false,
+            error: {
+              code: "INVALID_GAME_CONTINUE_REQUEST",
+              message:
+                "La demande de continuation ne doit contenir aucun argument.",
+            },
+          });
+          return;
+        }
+
+        try {
+          const continuation = gameManager.continueGame(socket.id);
+          io.to(continuation.room.code).emit(
+            SOCKET_EVENTS.ROOM_STATE,
+            continuation.room,
+          );
+
+          if (continuation.nextTurn !== undefined) {
+            io.to(continuation.nextTurn.drawerSocketId).emit(
+              SOCKET_EVENTS.TURN_SECRET,
+              continuation.nextTurn.secret,
+            );
+          }
+
+          request.acknowledge({
+            success: true,
+            data: { room: continuation.room },
+          });
+        } catch (error) {
+          request.acknowledge(actionFailure(error));
+        }
+      },
+    );
 
     socket.on(
       SOCKET_EVENTS.DRAWING_SUBMIT,

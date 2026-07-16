@@ -4,6 +4,7 @@ type GuessPayloadValidationResult =
   | {
       success: true;
       data: {
+        turnId: string;
         value: GuessValue;
       };
     }
@@ -16,7 +17,7 @@ type GuessPayloadValidationResult =
     };
 
 const INVALID_GUESS_MESSAGE =
-  "L’estimation doit être un nombre entier compris entre 1 et 10.";
+  "La demande doit contenir un identifiant de tour valide et une estimation entière comprise entre 1 et 10.";
 
 function invalidGuess(): GuessPayloadValidationResult {
   return {
@@ -42,12 +43,22 @@ export function validateSubmitGuessPayload(
     }
 
     const keys = Reflect.ownKeys(payload);
-    if (keys.length !== 1 || keys[0] !== "value") {
+    if (
+      keys.length !== 2 ||
+      !keys.includes("turnId") ||
+      !keys.includes("value")
+    ) {
       return invalidGuess();
     }
 
+    const turnIdDescriptor = Object.getOwnPropertyDescriptor(payload, "turnId");
     const descriptor = Object.getOwnPropertyDescriptor(payload, "value");
     if (
+      turnIdDescriptor === undefined ||
+      !("value" in turnIdDescriptor) ||
+      typeof turnIdDescriptor.value !== "string" ||
+      turnIdDescriptor.value.length === 0 ||
+      turnIdDescriptor.value.trim() !== turnIdDescriptor.value ||
       descriptor === undefined ||
       !("value" in descriptor) ||
       typeof descriptor.value !== "number" ||
@@ -60,12 +71,14 @@ export function validateSubmitGuessPayload(
     }
 
     const validatedPayload: SubmitGuessPayload = {
+      turnId: turnIdDescriptor.value,
       value: descriptor.value,
     };
 
     return {
       success: true,
       data: {
+        turnId: validatedPayload.turnId,
         value: validatedPayload.value as GuessValue,
       },
     };

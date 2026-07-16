@@ -521,6 +521,7 @@ describe("Socket.IO drawing submission integration", () => {
           expect(secrets).toEqual([
             {
               roomCode: room.roomCode,
+              turnId: drawingGame.turnId,
               drawerPlayerId: drawingGame.currentDrawer.id,
               secretLevel: SECRET_LEVEL,
             },

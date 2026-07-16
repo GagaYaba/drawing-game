@@ -15,6 +15,7 @@ export interface PublicPlayer {
   nickname: string;
   isHost: boolean;
   isReady: boolean;
+  score: number;
 }
 
 export type GamePhase =
@@ -22,7 +23,8 @@ export type GamePhase =
   | "ROUND_INTRO"
   | "DRAWING"
   | "VOTING"
-  | "REVEAL";
+  | "REVEAL"
+  | "FINISHED";
 
 export type GuessValue = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
 
@@ -50,15 +52,54 @@ export interface PublicGuessResult {
   };
   value: GuessValue;
   distance: number;
+  pointsEarned: number;
+  totalScore: number;
+}
+
+export interface PublicDrawerResult {
+  player: {
+    id: string;
+    nickname: string;
+  };
+  closeGuessCount: number;
+  pointsEarned: number;
+  totalScore: number;
+}
+
+export interface PublicLeaderboardEntry {
+  rank: number;
+  player: {
+    id: string;
+    nickname: string;
+  };
+  score: number;
 }
 
 export interface PublicRevealState {
   secretLevel: GuessValue;
   guesses: PublicGuessResult[];
+  drawerResult: PublicDrawerResult;
+  leaderboard: PublicLeaderboardEntry[];
+  nextDrawer: {
+    id: string;
+    nickname: string;
+  } | null;
+}
+
+export interface PublicFinishedState {
+  leaderboard: PublicLeaderboardEntry[];
+  winners: Array<{
+    id: string;
+    nickname: string;
+    score: number;
+  }>;
+  completedRounds: number;
+  completedTurns: number;
 }
 
 export interface PublicGameState {
   phase: GamePhase;
+  turnId: string;
   totalRounds: number;
   currentRound: number;
   currentTurnNumber: number;
@@ -72,6 +113,7 @@ export interface PublicGameState {
   submittedDrawing: PublicSubmittedDrawing | null;
   voting: PublicVotingState | null;
   reveal: PublicRevealState | null;
+  finished: PublicFinishedState | null;
 }
 
 export interface PublicRoomState {
@@ -107,6 +149,7 @@ export interface SubmitDrawingSuccessData {
 }
 
 export interface SubmitGuessPayload {
+  turnId: string;
   value: number;
 }
 
@@ -120,8 +163,16 @@ export type GuessErrorCode =
   | "NOT_VOTING_PHASE"
   | "DRAWER_CANNOT_GUESS"
   | "PLAYER_NOT_ELIGIBLE"
+  | "STALE_TURN"
   | "GUESS_ALREADY_SUBMITTED"
   | "INVALID_GUESS";
+
+export type ContinueGameErrorCode =
+  | "INVALID_GAME_CONTINUE_REQUEST"
+  | "NOT_HOST"
+  | "GAME_NOT_STARTED"
+  | "NOT_REVEAL_PHASE"
+  | "GAME_ALREADY_FINISHED";
 
 export type RoomErrorCode =
   | "INVALID_NICKNAME"
@@ -134,11 +185,14 @@ export type RoomErrorCode =
   | "NOT_IN_ROOM"
   | "PLAYER_NOT_FOUND"
   | "INVALID_GAME_START_REQUEST"
+  | "INVALID_GAME_CONTINUE_REQUEST"
   | "NOT_HOST"
   | "NOT_ENOUGH_PLAYERS"
   | "PLAYERS_NOT_READY"
   | "GAME_ALREADY_STARTED"
   | "GAME_NOT_IN_LOBBY"
+  | "NOT_REVEAL_PHASE"
+  | "GAME_ALREADY_FINISHED"
   | "NOT_DRAWING_PHASE"
   | "NOT_CURRENT_DRAWER"
   | "EMPTY_DRAWING"
@@ -171,8 +225,13 @@ export interface StartGameSuccessData {
   room: PublicRoomState;
 }
 
+export interface ContinueGameSuccessData {
+  room: PublicRoomState;
+}
+
 export interface TurnSecretPayload {
   roomCode: string;
+  turnId: string;
   drawerPlayerId: string;
   secretLevel: number;
 }
@@ -207,6 +266,9 @@ export interface ClientToServerEvents {
   ) => void;
   [SOCKET_EVENTS.GAME_START]: (
     acknowledge: ActionAcknowledgement<StartGameSuccessData>,
+  ) => void;
+  [SOCKET_EVENTS.GAME_CONTINUE]: (
+    acknowledge: ActionAcknowledgement<ContinueGameSuccessData>,
   ) => void;
   [SOCKET_EVENTS.DRAWING_SUBMIT]: (
     payload: SubmitDrawingPayload,

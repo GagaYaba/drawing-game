@@ -7,6 +7,7 @@ export const SOCKET_EVENTS = {
   ROOM_STATE: "room:state",
   PLAYER_SET_READY: "player:set-ready",
   GAME_START: "game:start",
+  GAME_CONTINUE: "game:continue",
   DRAWING_SUBMIT: "drawing:submit",
   GUESS_SUBMIT: "guess:submit",
   TURN_SECRET: "turn:secret",

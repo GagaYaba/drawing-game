@@ -441,6 +441,7 @@ describe("Socket.IO game integration", () => {
           expect(receivedSecrets).toEqual([
             {
               roomCode: room.roomCode,
+              turnId: acknowledgedGame.turnId,
               drawerPlayerId: acknowledgedGame.currentDrawer.id,
               secretLevel: SECRET_LEVEL,
             },

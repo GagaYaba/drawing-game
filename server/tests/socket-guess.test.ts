@@ -152,10 +152,26 @@ function submitDrawing(
 function submitGuess(
   socket: TestClient,
   value: number,
+  turnId = getActiveTurnId(socket),
 ): Promise<ActionResult<SubmitGuessSuccessData>> {
   return waitForAcknowledgement((acknowledge) => {
-    socket.emit(SOCKET_EVENTS.GUESS_SUBMIT, { value }, acknowledge);
+    socket.emit(SOCKET_EVENTS.GUESS_SUBMIT, { turnId, value }, acknowledge);
   });
+}
+
+function getActiveTurnId(socket: TestClient): string {
+  const socketId = socket.id;
+  const turnId =
+    socketId === undefined
+      ? undefined
+      : server?.roomManager.getPlayerRoomBySocketId(socketId)?.game?.currentTurn
+          .turnId;
+
+  if (turnId === undefined) {
+    throw new Error("Le tour actif du client de test est introuvable.");
+  }
+
+  return turnId;
 }
 
 function submitGuessWithArguments(
@@ -560,8 +576,37 @@ describe("Socket.IO authoritative guess integration", () => {
             player: { id: player.id, nickname: player.nickname },
             value,
             distance: Math.abs(value - SECRET_LEVEL),
+            pointsEarned: 3,
+            totalScore: 3,
           };
         });
+      const revealPlayers = receivedRevealStates[0]!.players;
+      const drawerPlayer = revealPlayers.find(
+        (player) =>
+          player.id ===
+          receivedRevealStates[0]!.game?.currentDrawer.id,
+      );
+      if (drawerPlayer === undefined) {
+        throw new Error("Le dessinateur public est introuvable.");
+      }
+      const voterPlayers = revealPlayers.filter(
+        (player) => player.id !== drawerPlayer.id,
+      );
+      const expectedLeaderboard = [
+        ...voterPlayers.map((player) => ({
+          rank: 1,
+          player: { id: player.id, nickname: player.nickname },
+          score: 3,
+        })),
+        {
+          rank: 3,
+          player: {
+            id: drawerPlayer.id,
+            nickname: drawerPlayer.nickname,
+          },
+          score: 0,
+        },
+      ];
 
       for (const state of receivedRevealStates) {
         const game = expectGame(state, "REVEAL");
@@ -573,6 +618,20 @@ describe("Socket.IO authoritative guess integration", () => {
         expect(game.reveal).toEqual({
           secretLevel: SECRET_LEVEL,
           guesses: expectedGuesses,
+          drawerResult: {
+            player: {
+              id: drawerPlayer.id,
+              nickname: drawerPlayer.nickname,
+            },
+            closeGuessCount: 0,
+            pointsEarned: 0,
+            totalScore: 0,
+          },
+          leaderboard: expectedLeaderboard,
+          nextDrawer: {
+            id: voterPlayers[0]!.id,
+            nickname: voterPlayers[0]!.nickname,
+          },
         });
         expect(game.reveal?.guesses).toHaveLength(2);
         expect(game.reveal?.guesses).not.toContainEqual(
@@ -584,11 +643,7 @@ describe("Socket.IO authoritative guess integration", () => {
         );
         expect(game).not.toHaveProperty("score");
         expect(game).not.toHaveProperty("points");
-        expect(game.reveal).not.toHaveProperty("score");
-        for (const guess of game.reveal?.guesses ?? []) {
-          expect(guess).not.toHaveProperty("score");
-          expect(guess).not.toHaveProperty("points");
-        }
+        expect(state.players.map(({ score }) => score)).toEqual([0, 3, 3]);
       }
 
       for (const collector of stateCollectors) {
@@ -651,19 +706,30 @@ describe("Socket.IO authoritative guess integration", () => {
     async () => {
       const room = await enterVoting(await prepareRoom("Validation"));
       const voter = room.sockets[room.voterIndexes[0]!]!;
+      const turnId = getActiveTurnId(voter);
       const invalidArguments: unknown[][] = [
-        [{ value: 0 }],
-        [{ value: 11 }],
-        [{ value: 5.5 }],
-        [{ value: "5" }],
-        [{ value: Number.NaN }],
-        [{ value: Number.POSITIVE_INFINITY }],
+        [{ turnId, value: 0 }],
+        [{ turnId, value: 11 }],
+        [{ turnId, value: 5.5 }],
+        [{ turnId, value: "5" }],
+        [{ turnId, value: Number.NaN }],
+        [{ turnId, value: Number.POSITIVE_INFINITY }],
+        [{ value: 5 }],
+        [{ turnId: "", value: 5 }],
+        [{ turnId: ` ${turnId} `, value: 5 }],
+        [{ turnId: 1, value: 5 }],
         [null],
         [],
-        [[{ value: 5 }]],
-        [{ value: 5, playerId: room.sessions[room.voterIndexes[0]!]!.playerId }],
-        [{ value: { nested: 5 } }],
-        [{ value: 5 }, { roomCode: room.roomCode }],
+        [[{ turnId, value: 5 }]],
+        [
+          {
+            turnId,
+            value: 5,
+            playerId: room.sessions[room.voterIndexes[0]!]!.playerId,
+          },
+        ],
+        [{ turnId, value: { nested: 5 } }],
+        [{ turnId, value: 5 }, { roomCode: room.roomCode }],
       ];
 
       for (const payloadArguments of invalidArguments) {
