@@ -179,6 +179,7 @@ export function App() {
         status={roomSession.connectionStatus}
         announcement={roomSession.connectionAnnouncement}
         hasStoredSession={roomSession.hasStoredSession}
+        isRetryingSessionRestore={roomSession.isRetryingSessionRestore}
         onRetry={roomSession.retrySessionRestore}
       />
     </>

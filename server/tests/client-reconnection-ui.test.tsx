@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import type {
   PublicPlayer,
   PublicRoomState,
@@ -20,6 +22,10 @@ import {
 
 const NOW = 1_700_000_000_000;
 const SESSION_TOKEN = "A".repeat(43);
+const GLOBAL_STYLES = readFileSync(
+  new URL("../../client/src/styles/global.css", import.meta.url),
+  "utf8",
+);
 
 function getVisibleText(markup: string) {
   return markup
@@ -27,6 +33,37 @@ function getVisibleText(markup: string) {
     .replace(/<[^>]+>/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function getCssBlock(styles: string, marker: string, fromIndex = 0) {
+  const markerIndex = styles.indexOf(marker, fromIndex);
+  if (markerIndex < 0) {
+    throw new Error(`Règle CSS introuvable : ${marker}`);
+  }
+
+  const openingBraceIndex = styles.indexOf("{", markerIndex);
+  if (openingBraceIndex < 0) {
+    throw new Error(`Bloc CSS invalide : ${marker}`);
+  }
+
+  let depth = 0;
+  for (
+    let index = openingBraceIndex;
+    index < styles.length;
+    index += 1
+  ) {
+    const character = styles[index];
+    if (character === "{") {
+      depth += 1;
+    } else if (character === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return styles.slice(openingBraceIndex + 1, index);
+      }
+    }
+  }
+
+  throw new Error(`Bloc CSS non fermé : ${marker}`);
 }
 
 function createPlayer(
@@ -56,6 +93,7 @@ describe("ConnectionRecoveryOverlay", () => {
           status: "disconnected" as const,
           announcement: "Connexion perdue.",
           hasStoredSession: true,
+          isRetryingSessionRestore: false,
           onRetry: () => undefined,
           token: SESSION_TOKEN,
         }}
@@ -77,6 +115,9 @@ describe("ConnectionRecoveryOverlay", () => {
     expect(markup).toContain(
       "connection-recovery-mascot--disconnected",
     );
+    expect(markup).toContain(
+      "connection-recovery__mascot-tile--disconnected",
+    );
     expect(markup).not.toContain(SESSION_TOKEN);
   });
 
@@ -86,6 +127,7 @@ describe("ConnectionRecoveryOverlay", () => {
         status="restoring"
         announcement="Cette annonce reste masquée pendant la restauration."
         hasStoredSession
+        isRetryingSessionRestore={false}
         onRetry={() => undefined}
       />,
     );
@@ -94,6 +136,7 @@ describe("ConnectionRecoveryOverlay", () => {
         status="connected"
         announcement="Votre session a été restaurée."
         hasStoredSession
+        isRetryingSessionRestore
         onRetry={() => undefined}
       />,
     );
@@ -110,6 +153,9 @@ describe("ConnectionRecoveryOverlay", () => {
     );
     expect(restoringMarkup).toContain(
       "connection-recovery-mascot--restoring",
+    );
+    expect(restoringMarkup).toContain(
+      "connection-recovery__mascot-tile--restoring",
     );
     expect(restoringMarkup).not.toContain(
       "Cette annonce reste masquée pendant la restauration.",
@@ -128,6 +174,7 @@ describe("ConnectionRecoveryOverlay", () => {
         status="disconnected"
         announcement={null}
         hasStoredSession={false}
+        isRetryingSessionRestore={false}
         onRetry={() => undefined}
       />,
     );
@@ -142,6 +189,7 @@ describe("ConnectionRecoveryOverlay", () => {
         status="restore-failed"
         announcement="Une erreur temporaire empêche la restauration."
         hasStoredSession
+        isRetryingSessionRestore={false}
         onRetry={() => undefined}
       />,
     );
@@ -155,11 +203,110 @@ describe("ConnectionRecoveryOverlay", () => {
     );
     expect(text).toContain("Réessayer la restauration");
     expect(markup).toContain('type="button"');
+    expect(markup).toContain('aria-busy="false"');
+    expect(markup).not.toContain("disabled");
     expect(markup).toContain('src="/mascots/poop/sad.png"');
     expect(markup).toContain(
       'data-character="poop" data-expression="sad"',
     );
     expect(markup).toContain("connection-recovery-mascot--failed");
+    expect(markup).toContain(
+      "connection-recovery__mascot-tile--failed",
+    );
+  });
+
+  it("garde le bouton visible, occupé et désactivé pendant une nouvelle tentative manuelle", () => {
+    const markup = renderToStaticMarkup(
+      <ConnectionRecoveryOverlay
+        status="restoring"
+        announcement="Nouvelle tentative en cours."
+        hasStoredSession
+        isRetryingSessionRestore
+        onRetry={() => undefined}
+      />,
+    );
+    const text = getVisibleText(markup);
+
+    expect(markup).toContain("connection-recovery-overlay");
+    expect(markup).toContain("connection-recovery-retry");
+    expect(markup).toContain('type="button"');
+    expect(markup).toContain("disabled");
+    expect(markup).toContain('aria-busy="true"');
+    expect(text).toContain("Restauration en cours");
+    expect(text).not.toContain("Réessayer la restauration");
+  });
+});
+
+describe("confinement visuel de la mascotte de reconnexion", () => {
+  it("utilise une tuile carrée qui centre et masque tout débordement", () => {
+    const tileRuleIndex = GLOBAL_STYLES.indexOf(
+      ".connection-recovery__mascot-tile {",
+    );
+    const tileRule = getCssBlock(
+      GLOBAL_STYLES,
+      ".connection-recovery__mascot-tile {",
+    );
+    const mascotRule = getCssBlock(
+      GLOBAL_STYLES,
+      ".connection-recovery__mascot-tile .mascot {",
+    );
+    const mobileRule = getCssBlock(
+      GLOBAL_STYLES,
+      "@media (max-width: 520px) {",
+      tileRuleIndex,
+    );
+
+    expect(tileRule).toContain(
+      "--connection-recovery-tile-size: 2.75rem;",
+    );
+    expect(tileRule).toContain(
+      "--connection-recovery-mascot-size: 2.125rem;",
+    );
+    expect(tileRule).toContain("display: grid;");
+    expect(tileRule).toContain(
+      "width: var(--connection-recovery-tile-size);",
+    );
+    expect(tileRule).toContain(
+      "height: var(--connection-recovery-tile-size);",
+    );
+    expect(tileRule).toContain("place-items: center;");
+    expect(tileRule).toContain("overflow: hidden;");
+
+    expect(mascotRule).toContain(
+      "width: var(--connection-recovery-mascot-size);",
+    );
+    expect(mascotRule).toContain(
+      "height: var(--connection-recovery-mascot-size);",
+    );
+    expect(mascotRule).toContain(
+      "max-width: var(--connection-recovery-mascot-size);",
+    );
+    expect(mascotRule).toContain("object-fit: contain;");
+    expect(mascotRule).toContain("object-position: center;");
+    expect(mascotRule).toContain("margin: 0;");
+    expect(mascotRule).toContain("animation: none;");
+    expect(mascotRule).toContain("transform: none;");
+
+    expect(mobileRule).not.toContain(
+      ".connection-recovery__mascot-tile",
+    );
+  });
+
+  it("neutralise explicitement animation et translation en mouvement réduit", () => {
+    const reducedMotionIndex = GLOBAL_STYLES.lastIndexOf(
+      "@media (prefers-reduced-motion: reduce) {",
+    );
+    const reducedMotionRule = getCssBlock(
+      GLOBAL_STYLES,
+      "@media (prefers-reduced-motion: reduce) {",
+      reducedMotionIndex,
+    );
+
+    expect(reducedMotionRule).toContain(
+      ".connection-recovery__mascot-tile .mascot",
+    );
+    expect(reducedMotionRule).toContain("animation: none !important;");
+    expect(reducedMotionRule).toContain("transform: none !important;");
   });
 });
 

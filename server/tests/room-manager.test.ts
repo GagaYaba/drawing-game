@@ -6,6 +6,11 @@ import {
   RoomManagerError,
   type RoomManagerOptions,
 } from "../src/rooms/room-manager.js";
+import {
+  SECOND_TEST_CLIENT_INSTANCE_ID,
+  TEST_CLIENT_INSTANCE_ID,
+  THIRD_TEST_CLIENT_INSTANCE_ID,
+} from "./test-client-instance.js";
 
 const DEFAULT_CODES = [
   "7KXMP",
@@ -16,14 +21,38 @@ const DEFAULT_CODES = [
   "WXYZ2",
 ];
 
+class TestRoomManager extends RoomManager {
+  override createRoom(
+    socketId: string,
+    nickname: string,
+    clientInstanceId = TEST_CLIENT_INSTANCE_ID,
+  ) {
+    return super.createRoom(socketId, nickname, clientInstanceId);
+  }
+
+  override joinRoom(
+    socketId: string,
+    nickname: string,
+    roomCode: string,
+    clientInstanceId = TEST_CLIENT_INSTANCE_ID,
+  ) {
+    return super.joinRoom(
+      socketId,
+      nickname,
+      roomCode,
+      clientInstanceId,
+    );
+  }
+}
+
 function createTestManager(
   overrides: RoomManagerOptions = {},
-): RoomManager {
+): TestRoomManager {
   const codes = [...DEFAULT_CODES];
   let nextId = 1;
   let timestamp = 1_000;
 
-  return new RoomManager({
+  return new TestRoomManager({
     codeGenerator: () => codes.shift() ?? "ZZZZZ",
     idGenerator: () => `player-${nextId++}`,
     clock: () => timestamp++,
@@ -312,5 +341,161 @@ describe("RoomManager", () => {
       () => manager.leaveRoom("unknown-socket"),
       "NOT_IN_ROOM",
     );
+  });
+
+  it("transfere atomiquement une session active vers un nouveau socket de la meme instance", () => {
+    const manager = createTestManager();
+    const created = manager.createRoom(
+      "socket-old",
+      "Alice",
+      TEST_CLIENT_INSTANCE_ID,
+    );
+    const internalPlayer = manager.getRoomByCode(
+      created.session.roomCode,
+    )?.players[0];
+    if (internalPlayer === undefined) {
+      throw new Error("Le joueur interne est introuvable.");
+    }
+    internalPlayer.score = 12;
+
+    const restored = manager.restoreSession({
+      ...created.session,
+      socketId: "socket-new",
+      clientInstanceId: TEST_CLIENT_INSTANCE_ID,
+      restoredAt: 2_000,
+    });
+
+    expect(restored.supersededSocketId).toBe("socket-old");
+    expect(restored.data.session).toEqual(created.session);
+    expect(restored.data.room.players).toEqual([
+      expect.objectContaining({
+        id: created.session.playerId,
+        isHost: true,
+        isConnected: true,
+        score: 12,
+      }),
+    ]);
+    expect(restored.data.room.playerCount).toBe(1);
+    expect(
+      manager.getPlayerRoomBySocketId("socket-old"),
+    ).toBeUndefined();
+    expect(
+      manager.getPlayerRoomBySocketId("socket-new")?.code,
+    ).toBe(created.session.roomCode);
+    expect(manager.isActivePlayerSocket("socket-old")).toBe(false);
+    expect(manager.isActivePlayerSocket("socket-new")).toBe(true);
+    expect(internalPlayer).toMatchObject({
+      socketId: "socket-new",
+      activeClientInstanceId: TEST_CLIENT_INSTANCE_ID,
+      isConnected: true,
+      disconnectedAt: null,
+      reconnectDeadline: null,
+    });
+    expect(JSON.stringify(restored.data.room)).not.toContain(
+      TEST_CLIENT_INSTANCE_ID,
+    );
+
+    expect(
+      manager.markPlayerDisconnected("socket-old", 2_100, 2_200),
+    ).toBeNull();
+    expect(manager.isActivePlayerSocket("socket-new")).toBe(true);
+  });
+
+  it("rend le handoff idempotent sur le socket deja devenu proprietaire", () => {
+    const manager = createTestManager();
+    const created = manager.createRoom(
+      "socket-old",
+      "Alice",
+      TEST_CLIENT_INSTANCE_ID,
+    );
+    const request = {
+      ...created.session,
+      socketId: "socket-new",
+      clientInstanceId: TEST_CLIENT_INSTANCE_ID,
+      restoredAt: 2_000,
+    };
+
+    const first = manager.restoreSession(request);
+    const second = manager.restoreSession({
+      ...request,
+      restoredAt: 2_001,
+    });
+
+    expect(first.supersededSocketId).toBe("socket-old");
+    expect(second.supersededSocketId).toBeNull();
+    expect(second.data.room.playerCount).toBe(1);
+    expect(
+      manager.getRoomByCode(created.session.roomCode)?.players,
+    ).toHaveLength(1);
+    expect(manager.isActivePlayerSocket("socket-new")).toBe(true);
+  });
+
+  it("refuse une autre instance active sans deposseder le socket original", () => {
+    const manager = createTestManager();
+    const created = manager.createRoom(
+      "socket-original",
+      "Alice",
+      TEST_CLIENT_INSTANCE_ID,
+    );
+
+    expectRoomError(
+      () =>
+        manager.restoreSession({
+          ...created.session,
+          socketId: "socket-second-tab",
+          clientInstanceId: SECOND_TEST_CLIENT_INSTANCE_ID,
+          restoredAt: 2_000,
+        }),
+      "SESSION_ALREADY_ACTIVE",
+    );
+    expectRoomError(
+      () =>
+        manager.restoreSession({
+          ...created.session,
+          token: `${created.session.token.startsWith("A") ? "B" : "A"}${created.session.token.slice(1)}`,
+          socketId: "socket-attacker",
+          clientInstanceId: TEST_CLIENT_INSTANCE_ID,
+          restoredAt: 2_000,
+        }),
+      "INVALID_SESSION",
+    );
+
+    expect(manager.isActivePlayerSocket("socket-original")).toBe(true);
+    expect(
+      manager.getPlayerRoomBySocketId("socket-second-tab"),
+    ).toBeUndefined();
+    expect(
+      manager.getRoomByCode(created.session.roomCode)?.players,
+    ).toHaveLength(1);
+  });
+
+  it("autorise une nouvelle instance apres une vraie deconnexion", () => {
+    const manager = createTestManager();
+    const created = manager.createRoom(
+      "socket-original",
+      "Alice",
+      TEST_CLIENT_INSTANCE_ID,
+    );
+    manager.markPlayerDisconnected("socket-original", 2_000, 3_000);
+
+    const restored = manager.restoreSession({
+      ...created.session,
+      socketId: "socket-second-tab",
+      clientInstanceId: THIRD_TEST_CLIENT_INSTANCE_ID,
+      restoredAt: 2_500,
+    });
+    const internalPlayer = manager.getRoomByCode(
+      created.session.roomCode,
+    )?.players[0];
+
+    expect(restored.supersededSocketId).toBeNull();
+    expect(restored.data.room.playerCount).toBe(1);
+    expect(internalPlayer).toMatchObject({
+      id: created.session.playerId,
+      socketId: "socket-second-tab",
+      activeClientInstanceId: THIRD_TEST_CLIENT_INSTANCE_ID,
+      isHost: true,
+      isConnected: true,
+    });
   });
 });

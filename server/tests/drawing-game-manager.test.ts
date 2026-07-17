@@ -13,6 +13,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { GameManager } from "../src/game/game-manager.js";
 import type { GameManagerOptions } from "../src/game/game-types.js";
 import { RoomManager, RoomManagerError } from "../src/rooms/room-manager.js";
+import { TEST_CLIENT_INSTANCE_ID } from "./test-client-instance.js";
 
 const ROOM_CODE = "7KXMP";
 const STARTED_AT = 20_000;
@@ -58,7 +59,11 @@ function prepareRoom(playerCount = 3): PreparedRoom {
     { length: playerCount },
     (_, index) => `socket-${index + 1}`,
   );
-  const host = roomManager.createRoom(socketIds[0]!, "J1");
+  const host = roomManager.createRoom(
+    socketIds[0]!,
+    "J1",
+    TEST_CLIENT_INSTANCE_ID,
+  );
   const playerIds = [host.session.playerId];
 
   for (let index = 1; index < socketIds.length; index += 1) {
@@ -66,6 +71,7 @@ function prepareRoom(playerCount = 3): PreparedRoom {
       socketIds[index]!,
       `J${index + 1}`,
       host.session.roomCode,
+      TEST_CLIENT_INSTANCE_ID,
     );
     playerIds.push(session.session.playerId);
   }

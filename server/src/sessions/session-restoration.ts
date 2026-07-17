@@ -1,12 +1,12 @@
 import type {
   RestoreSessionPayload,
-  RestoreSessionSuccessData,
 } from "@drawing-game/shared";
 
 import type {
   RoomManager,
   SessionRestoreCandidate,
 } from "../rooms/room-manager.js";
+import type { RestoreSessionResult } from "../rooms/room-types.js";
 import type { ReconnectManager } from "./reconnect-manager.js";
 
 export type SessionRestorationClock = () => number;
@@ -40,15 +40,15 @@ export class SessionRestorationManager {
   restoreSession(
     socketId: string,
     payload: RestoreSessionPayload,
-  ): RestoreSessionSuccessData {
+  ): RestoreSessionResult {
     const restored = this.roomManager.restoreSession({
       ...payload,
       socketId,
       restoredAt: this.clock(),
     });
     this.reconnectManager.clearPlayerReconnectTimer(
-      restored.session.roomCode,
-      restored.session.playerId,
+      restored.data.session.roomCode,
+      restored.data.session.playerId,
     );
     return restored;
   }

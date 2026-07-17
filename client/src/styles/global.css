@@ -2425,16 +2425,35 @@ footer {
   color: #4f46e5;
 }
 
-.connection-recovery-icon {
+.connection-recovery__mascot-tile {
+  --connection-recovery-tile-size: 2.75rem;
+  --connection-recovery-mascot-size: 2.125rem;
   display: grid;
-  width: 2.5rem;
-  height: 2.5rem;
+  width: var(--connection-recovery-tile-size);
+  height: var(--connection-recovery-tile-size);
+  flex: 0 0 var(--connection-recovery-tile-size);
+  align-self: start;
+  justify-self: start;
   place-items: center;
+  overflow: hidden;
   border-radius: 0.75rem;
   color: #3730a3;
   background: #e0e7ff;
   font-size: 1.3rem;
   font-weight: 900;
+}
+
+.connection-recovery__mascot-tile .mascot {
+  --mascot-size: var(--connection-recovery-mascot-size);
+  display: block;
+  width: var(--connection-recovery-mascot-size);
+  height: var(--connection-recovery-mascot-size);
+  max-width: var(--connection-recovery-mascot-size);
+  margin: 0;
+  object-fit: contain;
+  object-position: center;
+  animation: none;
+  transform: none;
 }
 
 .connection-recovery-hint {
@@ -2456,11 +2475,6 @@ footer {
 @media (max-width: 520px) {
   .connection-recovery-card {
     grid-template-columns: 1fr;
-  }
-
-  .connection-recovery-icon {
-    width: 2.25rem;
-    height: 2.25rem;
   }
 }
 
@@ -3643,7 +3657,7 @@ summary:focus-visible {
   color: var(--color-turquoise-dark);
 }
 
-.connection-recovery-icon {
+.connection-recovery__mascot-tile {
   border: 2px solid var(--color-border);
   color: var(--color-ink);
   background: var(--color-yellow);
@@ -3990,6 +4004,11 @@ footer {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .connection-recovery__mascot-tile .mascot {
+    animation: none !important;
+    transform: none !important;
+  }
+
   .lobby-player-mascot--ready,
   .readiness-mascot--ready,
   .readiness-mascot--waiting,

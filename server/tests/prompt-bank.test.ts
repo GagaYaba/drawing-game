@@ -4,10 +4,12 @@ import { toPublicGameState, TOTAL_ROUNDS } from "../src/game/game-manager.js";
 import type { DrawingPrompt, InternalGame } from "../src/game/game-types.js";
 import { DRAWING_PROMPTS } from "../src/game/prompt-bank.js";
 import type { InternalPlayer } from "../src/rooms/room-types.js";
+import { TEST_CLIENT_INSTANCE_ID } from "./test-client-instance.js";
 
 const DRAWER: InternalPlayer = {
   id: "drawer-id",
   socketId: "drawer-socket",
+  activeClientInstanceId: TEST_CLIENT_INSTANCE_ID,
   nickname: "Dessinatrice",
   isHost: true,
   isReady: true,

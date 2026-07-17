@@ -5,6 +5,7 @@ interface ConnectionRecoveryOverlayProps {
   status: ClientConnectionStatus;
   announcement: string | null;
   hasStoredSession: boolean;
+  isRetryingSessionRestore: boolean;
   onRetry: () => void;
 }
 
@@ -12,6 +13,7 @@ export function ConnectionRecoveryOverlay({
   status,
   announcement,
   hasStoredSession,
+  isRetryingSessionRestore,
   onRetry,
 }: ConnectionRecoveryOverlayProps) {
   const isDisconnected = status === "disconnected";
@@ -19,6 +21,7 @@ export function ConnectionRecoveryOverlay({
   const restoreFailed = status === "restore-failed";
   const isVisible =
     hasStoredSession && (isDisconnected || isRestoring || restoreFailed);
+  const showRetryButton = restoreFailed || isRetryingSessionRestore;
   const recoveryMascot = restoreFailed
     ? {
         character: "poop",
@@ -36,6 +39,11 @@ export function ConnectionRecoveryOverlay({
           expression: "fly",
           state: "restoring",
         } as const;
+  const handleRetry = () => {
+    if (!isRetryingSessionRestore) {
+      onRetry();
+    }
+  };
 
   return (
     <>
@@ -57,8 +65,8 @@ export function ConnectionRecoveryOverlay({
             aria-atomic="true"
             aria-labelledby="connection-recovery-title"
           >
-            <span
-              className={`connection-recovery-icon connection-recovery-icon--${recoveryMascot.state}`}
+            <div
+              className={`connection-recovery__mascot-tile connection-recovery__mascot-tile--${recoveryMascot.state}`}
               aria-hidden="true"
             >
               <Mascot
@@ -68,7 +76,7 @@ export function ConnectionRecoveryOverlay({
                 decorative
                 className={`connection-recovery-mascot connection-recovery-mascot--${recoveryMascot.state}`}
               />
-            </span>
+            </div>
             <div>
               <p className="card-label">Connexion au salon</p>
               <h2 id="connection-recovery-title">
@@ -90,13 +98,17 @@ export function ConnectionRecoveryOverlay({
                 Votre place est conservée pendant le délai de grâce accordé
                 par le serveur.
               </p>
-              {restoreFailed && (
+              {showRetryButton && (
                 <button
                   className="button button--primary connection-recovery-retry"
                   type="button"
-                  onClick={onRetry}
+                  disabled={isRetryingSessionRestore}
+                  aria-busy={isRetryingSessionRestore}
+                  onClick={handleRetry}
                 >
-                  Réessayer la restauration
+                  {isRetryingSessionRestore
+                    ? "Restauration en cours…"
+                    : "Réessayer la restauration"}
                 </button>
               )}
             </div>

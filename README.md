@@ -1,5 +1,7 @@
 # Drawing Scale Game
 
+SERVEUR EN LIGNE : https://drawing-scale-game.onrender.com/
+
 [![CI](https://github.com/GagaYaba/drawing-game/actions/workflows/ci.yml/badge.svg)](https://github.com/GagaYaba/drawing-game/actions/workflows/ci.yml)
 
 Application multijoueur de dessin en temps réel. Les joueurs créent ou rejoignent un salon, se préparent dans le lobby, puis enchaînent deux manches complètes de dessin, d'estimation et de score avant de découvrir le classement final.
@@ -285,21 +287,23 @@ La soumission utilise l'événement `drawing:submit` avec le payload `{ drawing 
 
 Utilisez au moins trois navigateurs, profils ou contextes isolés. Pour accélérer le scénario d'expiration, vous pouvez lancer temporairement le serveur avec une petite valeur de `PLAYER_RECONNECT_GRACE_MS`.
 
-1. Actualisez successivement un joueur dans le lobby, `ROUND_INTRO`, `DRAWING`, `VOTING` avant et après validation, `REVEAL` puis `FINISHED`. Vérifiez que le même joueur, le même rôle, le même score, le même `gameId` et le même `turnId` reviennent.
+1. Actualisez successivement un joueur avec F5 dans le lobby, `ROUND_INTRO`, `DRAWING`, `VOTING` avant et après validation, `REVEAL` puis `FINISHED`. La restauration doit réussir même si le nouveau socket arrive avant le `disconnect` de l'ancien. Vérifiez que le même joueur, le même rôle, le même score, le même `gameId` et le même `turnId` reviennent, sans doublon ni timer de reconnexion tardif.
 2. Pendant `DRAWING`, tracez plusieurs traits, changez d'outil, actualisez le dessinateur puis vérifiez le retour du dessin local et du niveau secret avant de soumettre.
 3. Pendant `VOTING`, actualisez une sélection non envoyée puis une estimation déjà validée. La première doit rester modifiable ; la seconde doit revenir verrouillée et un second envoi doit être refusé.
 4. Coupez brièvement le réseau d'un client. Son écran doit rester visible sous la superposition `Connexion interrompue`, et les autres joueurs doivent voir son statut `Reconnexion…`. Rétablissez le réseau et vérifiez la disparition des deux états.
 5. Laissez expirer un joueur pendant une phase active. Les autres doivent recevoir `RECONNECT_TIMEOUT` et revenir au lobby avec scores et statuts prêts remis à zéro. Vérifiez qu'une restauration ultérieure est refusée.
 6. Cliquez sur **Quitter la partie** et vérifiez le retrait immédiat, le nettoyage du stockage local et l'impossibilité de restaurer cette session.
-7. Ouvrez la même origine dans un second onglet pendant que le premier reste actif. Le second doit afficher `Cette session est déjà ouverte dans un autre onglet` sans prendre le contrôle.
+7. Ouvrez la même origine dans un second onglet pendant que le premier reste actif. Le second doit afficher `Cette session est déjà ouverte dans un autre onglet` sans prendre le contrôle, et le premier doit pouvoir continuer à agir. Fermez ensuite réellement le premier onglet et utilisez **Réessayer la restauration** dans le second pendant la grâce.
 8. Après une restauration dans `FINISHED`, proposez une revanche puis relancez la partie. Les credentials doivent rester valides tandis que les anciens brouillons, secrets et votes doivent être absents.
-9. Contrôlez la superposition aux largeurs 320, 375 et 390 px, puis aux résolutions 1366 × 768, 1440 × 900, 1536 × 864 et 1920 × 1080, sans débordement ni perte du contenu sous-jacent.
+9. Contrôlez la superposition en 320 × 568, 375 × 667, 390 × 844, 1366 × 768, 1440 × 900 et 1920 × 1080. La mascotte doit rester centrée et entièrement contenue dans sa tuile jaune, sans débordement ni perte du contenu sous-jacent.
 
 ## Stockage et durée de vie des salons
 
 Les salons, les joueurs et l'état de partie sont stockés **uniquement dans la mémoire du serveur**. Ils disparaissent donc lorsque le serveur redémarre, et un salon est supprimé dès que son dernier joueur le quitte.
 
-À la création ou à la connexion, le serveur génère un jeton aléatoire avec `crypto.randomBytes(32).toString("base64url")`. Le jeton brut est renvoyé uniquement dans l'acknowledgement privé du joueur et enregistré dans `localStorage` sous la clé `drawing-scale-game-session`. Le serveur ne conserve que son hash SHA-256 dans le joueur interne et utilise une comparaison sûre lors de `session:restore`. Le jeton, son hash, `socketId` et `disconnectedAt` ne font jamais partie de `PublicPlayer`, de `PublicRoomState`, des logs ou du DOM.
+À la création ou à la connexion, le serveur génère un jeton aléatoire avec `crypto.randomBytes(32).toString("base64url")`. Le jeton brut est renvoyé uniquement dans l'acknowledgement privé du joueur et enregistré dans `localStorage` sous la clé `drawing-scale-game-session`. Le serveur ne conserve que son hash SHA-256 dans le joueur interne et utilise une comparaison sûre lors de `session:restore`.
+
+Le client génère aussi un UUID non secret sous la clé `drawing-scale-game-client-instance`. Cet identifiant vit uniquement dans `sessionStorage` : il survit à l'actualisation du même onglet, tandis qu'un nouvel onglet normal reçoit un autre UUID. Il est envoyé par `room:create`, `room:join` et `session:restore`, mais ne remplace jamais le jeton. Aucun token supplémentaire n'est placé dans `sessionStorage`. Le jeton, son hash, `socketId`, `activeClientInstanceId` et `disconnectedAt` ne font jamais partie de `PublicPlayer`, de `PublicRoomState`, des logs ou du DOM.
 
 Lors d'une déconnexion involontaire, le joueur reste dans le salon avec `isConnected: false` et un `reconnectDeadline`. Le délai par défaut est de 60 secondes et peut être configuré avec `PLAYER_RECONNECT_GRACE_MS`. La phase en cours n'est pas mise en pause : `ROUND_INTRO` peut continuer vers `DRAWING`, tandis que le jeu attend naturellement un dessinateur, un votant ou un hôte absent. Les autres clients affichent textuellement `Reconnexion…`.
 
@@ -311,17 +315,18 @@ session:restore
   roomCode: string;
   playerId: string;
   token: string;
+  clientInstanceId: string;
 }
 ```
 
-Une restauration valide annule le timer, rattache le nouveau `socket.id` au même joueur, rejoint de nouveau la room Socket.IO et conserve le rôle d'hôte, le score, l'ordre de passage et l'état de partie. L'acknowledgement privé contient l'état public courant ainsi que, pour le seul joueur restauré :
+Une restauration valide annule le timer, rattache le nouveau `socket.id` au même joueur, rejoint de nouveau la room Socket.IO et conserve le rôle d'hôte, le score, l'ordre de passage et l'état de partie. Si l'ancien socket du même `clientInstanceId` est encore présent pendant un F5, le serveur transfère d'abord atomiquement l'autorité au nouveau socket, retire l'ancien mapping, puis ferme l'ancien socket. Sa déconnexion tardive est ainsi sans effet et ne démarre aucun délai de grâce. L'acknowledgement privé contient l'état public courant ainsi que, pour le seul joueur restauré :
 
 - les `gameId` et `turnId` courants ;
 - le niveau secret uniquement s'il est le dessinateur du tour ;
 - sa propre estimation déjà validée et son horodatage ;
 - l'indication qu'il est ou non le dessinateur courant.
 
-Une session déjà active sur un autre socket est refusée avec `SESSION_ALREADY_ACTIVE`. Le client effectue une seule nouvelle tentative très courte pour absorber la course d'une actualisation, puis affiche un message explicite. Deux onglets actifs simultanément avec la même session ne sont pas pris en charge et le premier onglet reste propriétaire.
+Une session encore active avec un `clientInstanceId` différent est refusée avec `SESSION_ALREADY_ACTIVE` : le véritable second onglet ne prend pas le contrôle et le premier reste propriétaire. Après la déconnexion réelle du premier, le second peut restaurer avec le jeton valide pendant le délai de grâce et devient alors l'instance active. Le client réserve ses nouvelles tentatives automatiques bornées aux erreurs transitoires de transport ou internes ; `SESSION_ALREADY_ACTIVE` attend une action manuelle. Le bouton de nouvelle tentative conserve les credentials, réarme une tentative complète et empêche les doubles clics pendant son chargement.
 
 Le brouillon de dessin est stocké séparément sous `drawing-scale-game-draft` après la fin d'un trait ou une modification d'outil. Il contient le document vectoriel, l'outil, la couleur, l'épaisseur et les identifiants du salon, de la partie, du tour et du joueur. Il n'est restauré que pour le dessinateur courant, pendant le même tour `DRAWING`, avant toute soumission officielle. Une sélection de vote non envoyée utilise `drawing-scale-game-guess-draft` avec les mêmes protections d'identifiants. Une estimation déjà validée reste, elle, autoritaire côté serveur et revient verrouillée dans l'état privé restauré.
 

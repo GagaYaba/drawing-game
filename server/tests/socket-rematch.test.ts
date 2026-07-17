@@ -30,6 +30,7 @@ import { io as createSocketClient, type Socket } from "socket.io-client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { createDrawingGameServer } from "../src/create-server.js";
+import { TEST_CLIENT_INSTANCE_ID } from "./test-client-instance.js";
 
 type TestClient = Socket<ServerToClientEvents, ClientToServerEvents>;
 type DrawingGameServer = ReturnType<typeof createDrawingGameServer>;
@@ -96,7 +97,11 @@ function createRoom(
   nickname: string,
 ): Promise<ActionResult<RoomSessionData>> {
   return waitForAcknowledgement((acknowledge) => {
-    socket.emit(SOCKET_EVENTS.ROOM_CREATE, { nickname }, acknowledge);
+    socket.emit(
+      SOCKET_EVENTS.ROOM_CREATE,
+      { nickname, clientInstanceId: TEST_CLIENT_INSTANCE_ID },
+      acknowledge,
+    );
   });
 }
 
@@ -108,7 +113,11 @@ function joinRoom(
   return waitForAcknowledgement((acknowledge) => {
     socket.emit(
       SOCKET_EVENTS.ROOM_JOIN,
-      { nickname, roomCode },
+      {
+        nickname,
+        roomCode,
+        clientInstanceId: TEST_CLIENT_INSTANCE_ID,
+      },
       acknowledge,
     );
   });

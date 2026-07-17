@@ -123,7 +123,11 @@ export function registerSocketHandlers(
 
       let session: RoomSessionData;
       try {
-        session = roomManager.createRoom(socket.id, validation.data.nickname);
+        session = roomManager.createRoom(
+          socket.id,
+          validation.data.nickname,
+          validation.data.clientInstanceId,
+        );
       } catch (error) {
         request.acknowledge(actionFailure(error));
         return;
@@ -165,6 +169,7 @@ export function registerSocketHandlers(
           socket.id,
           validation.data.nickname,
           validation.data.roomCode,
+          validation.data.clientInstanceId,
         );
       } catch (error) {
         request.acknowledge(actionFailure(error));
@@ -229,15 +234,24 @@ export function registerSocketHandlers(
         }
 
         let restored: RestoreSessionSuccessData;
+        let supersededSocketId: string | null;
         try {
-          restored = sessionRestorationManager.restoreSession(
+          const restoration = sessionRestorationManager.restoreSession(
             socket.id,
             validation.data,
           );
+          restored = restoration.data;
+          supersededSocketId = restoration.supersededSocketId;
         } catch (error) {
           await socket.leave(roomCode);
           request.acknowledge(actionFailure(error));
           return;
+        }
+
+        if (supersededSocketId !== null) {
+          io.sockets.sockets
+            .get(supersededSocketId)
+            ?.disconnect(true);
         }
 
         request.acknowledge({ success: true, data: restored });
@@ -489,7 +503,8 @@ export function registerSocketHandlers(
 
     socket.on("disconnect", (reason) => {
       const disconnection =
-        reason === "server shutting down"
+        reason === "server shutting down" ||
+        !roomManager.isActivePlayerSocket(socket.id)
           ? null
           : reconnectManager.markPlayerDisconnected(socket.id);
 

@@ -1,6 +1,7 @@
 import type { RestoreSessionPayload } from "@drawing-game/shared";
 
 import { normalizeRoomCode } from "../rooms/room-validation.js";
+import { isValidClientInstanceId } from "./client-instance-validation.js";
 import { isValidSessionToken } from "./session-token.js";
 
 export const MAX_SESSION_PLAYER_ID_LENGTH = 128;
@@ -59,7 +60,12 @@ export function validateRestoreSessionPayload(
     }
 
     const keys = Reflect.ownKeys(payload);
-    const expectedKeys = ["roomCode", "playerId", "token"] as const;
+    const expectedKeys = [
+      "roomCode",
+      "playerId",
+      "token",
+      "clientInstanceId",
+    ] as const;
 
     if (
       keys.length !== expectedKeys.length ||
@@ -73,6 +79,10 @@ export function validateRestoreSessionPayload(
     const receivedRoomCode = readOwnString(payload, "roomCode");
     const playerId = readOwnString(payload, "playerId");
     const token = readOwnString(payload, "token");
+    const clientInstanceId = readOwnString(
+      payload,
+      "clientInstanceId",
+    );
 
     if (
       receivedRoomCode === null ||
@@ -81,7 +91,8 @@ export function validateRestoreSessionPayload(
       playerId.length > MAX_SESSION_PLAYER_ID_LENGTH ||
       playerId.trim() !== playerId ||
       token === null ||
-      !isValidSessionToken(token)
+      !isValidSessionToken(token) ||
+      !isValidClientInstanceId(clientInstanceId)
     ) {
       return INVALID_SESSION_RESULT;
     }
@@ -92,6 +103,7 @@ export function validateRestoreSessionPayload(
         roomCode: normalizeRoomCode(receivedRoomCode),
         playerId,
         token,
+        clientInstanceId,
       },
     };
   } catch {

@@ -3,6 +3,7 @@ import { randomInt, randomUUID } from "node:crypto";
 import type { PublicPlayer, PublicRoomState } from "@drawing-game/shared";
 
 import { toPublicGameState } from "../game/game-manager.js";
+import { isValidClientInstanceId } from "../sessions/client-instance-validation.js";
 import {
   createSessionToken,
   hashSessionToken,
@@ -92,8 +93,13 @@ export class RoomManager {
     }
   }
 
-  createRoom(socketId: string, nickname: string): CreateRoomResult {
+  createRoom(
+    socketId: string,
+    nickname: string,
+    clientInstanceId: string,
+  ): CreateRoomResult {
     this.assertSocketIsAvailable(socketId);
+    this.assertClientInstanceId(clientInstanceId);
     const normalizedNickname = normalizeNickname(nickname);
     const code = this.generateUniqueRoomCode();
     const timestamp = this.clock();
@@ -102,6 +108,7 @@ export class RoomManager {
       normalizedNickname,
       true,
       timestamp,
+      clientInstanceId,
     );
     const room: InternalRoom = {
       code,
@@ -127,8 +134,10 @@ export class RoomManager {
     socketId: string,
     nickname: string,
     roomCode: string,
+    clientInstanceId: string,
   ): JoinRoomResult {
     this.assertSocketIsAvailable(socketId);
+    this.assertClientInstanceId(clientInstanceId);
     const code = normalizeRoomCode(roomCode);
     const normalizedNickname = normalizeNickname(nickname);
     const room = this.rooms.get(code);
@@ -171,6 +180,7 @@ export class RoomManager {
       normalizedNickname,
       false,
       this.clock(),
+      clientInstanceId,
     );
     room.players.push(player);
     this.roomCodeBySocketId.set(socketId, code);
@@ -251,16 +261,10 @@ export class RoomManager {
       roomCode: string;
       playerId: string;
       token: string;
+      clientInstanceId: string;
     },
     restoredAt: number,
   ): SessionRestoreCandidate {
-    if (this.roomCodeBySocketId.has(socketId)) {
-      throw new RoomManagerError(
-        "SESSION_ALREADY_ACTIVE",
-        "Cette session est déjà ouverte dans un autre onglet.",
-      );
-    }
-
     if (!Number.isFinite(restoredAt)) {
       throw new RoomManagerError(
         "INTERNAL_ERROR",
@@ -296,28 +300,54 @@ export class RoomManager {
       );
     }
 
-    if (player.isConnected || player.socketId !== null) {
-      throw new RoomManagerError(
-        "SESSION_ALREADY_ACTIVE",
-        "Cette session est déjà ouverte dans un autre onglet.",
-      );
-    }
+    this.assertClientInstanceId(payload.clientInstanceId);
 
-    if (
-      player.disconnectedAt === null ||
-      player.reconnectDeadline === null
-    ) {
-      throw new RoomManagerError(
-        "INVALID_SESSION",
-        "La session enregistrée n’est pas valide.",
-      );
-    }
+    const socketRoomCode = this.roomCodeBySocketId.get(socketId);
 
-    if (restoredAt >= player.reconnectDeadline) {
-      throw new RoomManagerError(
-        "SESSION_EXPIRED",
-        "Le délai de reconnexion est expiré.",
-      );
+    if (socketRoomCode !== undefined) {
+      const isIdempotentRestore =
+        socketRoomCode === roomCode &&
+        player.socketId === socketId &&
+        player.isConnected &&
+        player.activeClientInstanceId === payload.clientInstanceId;
+
+      if (!isIdempotentRestore) {
+        throw new RoomManagerError(
+          "SESSION_ALREADY_ACTIVE",
+          "Cette session est déjà ouverte dans un autre onglet.",
+        );
+      }
+    } else if (player.isConnected || player.socketId !== null) {
+      if (!player.isConnected || player.socketId === null) {
+        throw new RoomManagerError(
+          "INTERNAL_ERROR",
+          "L’association réseau du joueur est incohérente.",
+        );
+      }
+
+      if (player.activeClientInstanceId !== payload.clientInstanceId) {
+        throw new RoomManagerError(
+          "SESSION_ALREADY_ACTIVE",
+          "Cette session est déjà ouverte dans un autre onglet.",
+        );
+      }
+    } else {
+      if (
+        player.disconnectedAt === null ||
+        player.reconnectDeadline === null
+      ) {
+        throw new RoomManagerError(
+          "INVALID_SESSION",
+          "La session enregistrée n’est pas valide.",
+        );
+      }
+
+      if (restoredAt >= player.reconnectDeadline) {
+        throw new RoomManagerError(
+          "SESSION_EXPIRED",
+          "Le délai de reconnexion est expiré.",
+        );
+      }
     }
 
     return {
@@ -349,12 +379,31 @@ export class RoomManager {
       );
     }
 
+    const previousSocketId = player.socketId;
+    const previousIsConnected = player.isConnected;
     const previousDisconnectedAt = player.disconnectedAt;
     const previousReconnectDeadline = player.reconnectDeadline;
+    const previousClientInstanceId = player.activeClientInstanceId;
+    const previousIncomingSocketRoomCode =
+      this.roomCodeBySocketId.get(request.socketId);
+    const previousSocketRoomCode =
+      previousSocketId === null
+        ? undefined
+        : this.roomCodeBySocketId.get(previousSocketId);
+    const supersededSocketId =
+      previousSocketId !== null && previousSocketId !== request.socketId
+        ? previousSocketId
+        : null;
+
+    if (supersededSocketId !== null) {
+      this.roomCodeBySocketId.delete(supersededSocketId);
+    }
+
     player.socketId = request.socketId;
     player.isConnected = true;
     player.disconnectedAt = null;
     player.reconnectDeadline = null;
+    player.activeClientInstanceId = request.clientInstanceId;
     this.roomCodeBySocketId.set(request.socketId, room.code);
 
     try {
@@ -366,31 +415,54 @@ export class RoomManager {
         game === null ? undefined : game.currentTurn.guesses[player.id];
 
       return {
-        room: this.toPublicRoomState(room),
-        session: candidate.credentials,
-        privateState: {
-          gameId: game?.gameId ?? null,
-          turnId: game?.currentTurn.turnId ?? null,
-          secretLevel:
-            game !== null && isCurrentDrawer
-              ? game.currentTurn.secretLevel
-              : null,
-          submittedGuess:
-            submittedGuess === undefined
-              ? null
-              : {
-                  value: submittedGuess.value,
-                  submittedAt: submittedGuess.submittedAt,
-                },
-          isCurrentDrawer,
+        data: {
+          room: this.toPublicRoomState(room),
+          session: candidate.credentials,
+          privateState: {
+            gameId: game?.gameId ?? null,
+            turnId: game?.currentTurn.turnId ?? null,
+            secretLevel:
+              game !== null && isCurrentDrawer
+                ? game.currentTurn.secretLevel
+                : null,
+            submittedGuess:
+              submittedGuess === undefined
+                ? null
+                : {
+                    value: submittedGuess.value,
+                    submittedAt: submittedGuess.submittedAt,
+                  },
+            isCurrentDrawer,
+          },
         },
+        supersededSocketId,
       };
     } catch (error) {
       this.roomCodeBySocketId.delete(request.socketId);
-      player.socketId = null;
-      player.isConnected = false;
+
+      if (previousIncomingSocketRoomCode !== undefined) {
+        this.roomCodeBySocketId.set(
+          request.socketId,
+          previousIncomingSocketRoomCode,
+        );
+      }
+
+      if (
+        previousSocketId !== null &&
+        previousSocketId !== request.socketId &&
+        previousSocketRoomCode !== undefined
+      ) {
+        this.roomCodeBySocketId.set(
+          previousSocketId,
+          previousSocketRoomCode,
+        );
+      }
+
+      player.socketId = previousSocketId;
+      player.isConnected = previousIsConnected;
       player.disconnectedAt = previousDisconnectedAt;
       player.reconnectDeadline = previousReconnectDeadline;
+      player.activeClientInstanceId = previousClientInstanceId;
 
       if (error instanceof RoomManagerError) {
         throw error;
@@ -506,6 +578,17 @@ export class RoomManager {
     return roomCode ? this.rooms.get(roomCode) : undefined;
   }
 
+  isActivePlayerSocket(socketId: string): boolean {
+    const roomCode = this.roomCodeBySocketId.get(socketId);
+    const room =
+      roomCode === undefined ? undefined : this.rooms.get(roomCode);
+    const player = room?.players.find(
+      (candidate) => candidate.socketId === socketId,
+    );
+
+    return player?.isConnected === true;
+  }
+
   getPublicRoomState(roomCode: string): PublicRoomState {
     const code = normalizeRoomCode(roomCode);
     const room = this.rooms.get(code);
@@ -529,11 +612,21 @@ export class RoomManager {
     }
   }
 
+  private assertClientInstanceId(clientInstanceId: string): void {
+    if (!isValidClientInstanceId(clientInstanceId)) {
+      throw new RoomManagerError(
+        "INVALID_SESSION",
+        "L’instance cliente est invalide.",
+      );
+    }
+  }
+
   private createPlayer(
     socketId: string,
     nickname: string,
     isHost: boolean,
     joinedAt: number,
+    activeClientInstanceId: string,
   ): { player: InternalPlayer; token: string } {
     let token: unknown;
 
@@ -559,6 +652,7 @@ export class RoomManager {
       player: {
         id: this.idGenerator(),
         socketId,
+        activeClientInstanceId,
         nickname,
         isHost,
         isReady: false,

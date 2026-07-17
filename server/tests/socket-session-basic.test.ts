@@ -6,7 +6,6 @@ import {
   type ActionResult,
   type ClientToServerEvents,
   type PublicRoomState,
-  type RestoreSessionPayload,
   type RestoreSessionSuccessData,
   type RoomErrorCode,
   type RoomSessionData,
@@ -16,6 +15,10 @@ import { io as createSocketClient, type Socket } from "socket.io-client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { createDrawingGameServer } from "../src/create-server.js";
+import {
+  SECOND_TEST_CLIENT_INSTANCE_ID,
+  TEST_CLIENT_INSTANCE_ID,
+} from "./test-client-instance.js";
 
 type TestClient = Socket<ServerToClientEvents, ClientToServerEvents>;
 type DrawingGameServer = ReturnType<typeof createDrawingGameServer>;
@@ -114,11 +117,12 @@ function emitRawAction<T>(
 function createRoom(
   socket: TestClient,
   nickname: string,
+  clientInstanceId = TEST_CLIENT_INSTANCE_ID,
 ): Promise<ActionResult<RoomSessionData>> {
   return waitForAcknowledgement((acknowledge) => {
     socket.emit(
       SOCKET_EVENTS.ROOM_CREATE,
-      { nickname },
+      { nickname, clientInstanceId },
       acknowledge,
     );
   });
@@ -128,11 +132,12 @@ function joinRoom(
   socket: TestClient,
   nickname: string,
   roomCode: string,
+  clientInstanceId = TEST_CLIENT_INSTANCE_ID,
 ): Promise<ActionResult<RoomSessionData>> {
   return waitForAcknowledgement((acknowledge) => {
     socket.emit(
       SOCKET_EVENTS.ROOM_JOIN,
-      { nickname, roomCode },
+      { nickname, roomCode, clientInstanceId },
       acknowledge,
     );
   });
@@ -140,12 +145,13 @@ function joinRoom(
 
 function restoreSession(
   socket: TestClient,
-  payload: RestoreSessionPayload,
+  payload: RoomSessionData["session"],
+  clientInstanceId = SECOND_TEST_CLIENT_INSTANCE_ID,
 ): Promise<ActionResult<RestoreSessionSuccessData>> {
   return waitForAcknowledgement((acknowledge) => {
     socket.emit(
       SOCKET_EVENTS.SESSION_RESTORE,
-      payload,
+      { ...payload, clientInstanceId },
       acknowledge,
     );
   });
@@ -372,6 +378,12 @@ describe("basic Socket.IO session restoration", () => {
         "sessionTokenHash",
       );
       expect(publicState.players[0]).not.toHaveProperty("socketId");
+      expect(publicState.players[0]).not.toHaveProperty(
+        "activeClientInstanceId",
+      );
+      expect(JSON.stringify(publicState)).not.toContain(
+        TEST_CLIENT_INSTANCE_ID,
+      );
     },
     TEST_TIMEOUT_MS,
   );
@@ -488,7 +500,11 @@ describe("basic Socket.IO session restoration", () => {
         await emitRawAction<RestoreSessionSuccessData>(
           attacker,
           SOCKET_EVENTS.SESSION_RESTORE,
-          { ...credentials, unexpected: true },
+          {
+            ...credentials,
+            clientInstanceId: SECOND_TEST_CLIENT_INSTANCE_ID,
+            unexpected: true,
+          },
         ),
         "INVALID_SESSION",
       );
@@ -549,6 +565,99 @@ describe("basic Socket.IO session restoration", () => {
   );
 
   it(
+    "effectue un handoff actif avant le disconnect puis ignore l'ancien socket",
+    async () => {
+      const room = await createTwoPlayerRoom("Refresh");
+      const credentials = room.hostSession.session;
+      const internalHost = getServer()
+        .roomManager.getRoomByCode(credentials.roomCode)
+        ?.players.find(
+          (player) => player.id === credentials.playerId,
+        );
+      if (internalHost === undefined) {
+        throw new Error("L'hote interne est introuvable.");
+      }
+      internalHost.score = 12;
+
+      const refreshedSocket = await connectClient();
+      const oldSocketId = room.host.id;
+      const refreshedSocketId = refreshedSocket.id;
+      if (
+        oldSocketId === undefined ||
+        refreshedSocketId === undefined
+      ) {
+        throw new Error("Les sockets de test doivent etre connectes.");
+      }
+      const oldSocketDisconnected = new Promise<void>((resolve) => {
+        room.host.once("disconnect", () => resolve());
+      });
+      const restored = expectSuccess(
+        await restoreSession(
+          refreshedSocket,
+          credentials,
+          TEST_CLIENT_INSTANCE_ID,
+        ),
+      );
+      await oldSocketDisconnected;
+
+      expect(restored.session).toEqual(credentials);
+      expect(restored.room.playerCount).toBe(2);
+      expect(restored.room.players).toContainEqual(
+        expect.objectContaining({
+          id: credentials.playerId,
+          isHost: true,
+          isConnected: true,
+          reconnectDeadline: null,
+          score: 12,
+        }),
+      );
+      expect(JSON.stringify(restored.room)).not.toContain(
+        TEST_CLIENT_INSTANCE_ID,
+      );
+      expect(room.host.connected).toBe(false);
+      expect(
+        getServer().roomManager.getPlayerRoomBySocketId(oldSocketId),
+      ).toBeUndefined();
+      expect(
+        getServer().roomManager.getPlayerRoomBySocketId(
+          refreshedSocketId,
+        )?.code,
+      ).toBe(credentials.roomCode);
+      expect(
+        getServer().roomManager.isActivePlayerSocket(
+          refreshedSocketId,
+        ),
+      ).toBe(true);
+      expect(timers.pendingCount()).toBe(0);
+      expect(
+        getServer().reconnectManager.getPendingTimerCount(),
+      ).toBe(0);
+
+      const repeated = expectSuccess(
+        await restoreSession(
+          refreshedSocket,
+          credentials,
+          TEST_CLIENT_INSTANCE_ID,
+        ),
+      );
+      expect(repeated.room.playerCount).toBe(2);
+      expect(
+        getServer().roomManager.getRoomByCode(credentials.roomCode)
+          ?.players,
+      ).toHaveLength(2);
+      expectSuccess(
+        await emitRawAction<PublicRoomState>(
+          refreshedSocket,
+          SOCKET_EVENTS.PLAYER_SET_READY,
+          { isReady: true },
+        ),
+      );
+      expect(timers.pendingCount()).toBe(0);
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
     "refuse qu'un second onglet prenne une session encore active",
     async () => {
       const activeSocket = await connectClient();
@@ -570,6 +679,51 @@ describe("basic Socket.IO session restoration", () => {
       ).toMatchObject({
         id: activeSession.session.playerId,
         isConnected: true,
+      });
+      expect(activeSocket.connected).toBe(true);
+      expect(timers.pendingCount()).toBe(0);
+      expectSuccess(
+        await emitRawAction<PublicRoomState>(
+          activeSocket,
+          SOCKET_EVENTS.PLAYER_SET_READY,
+          { isReady: true },
+        ),
+      );
+
+      activeSocket.disconnect();
+      await waitForCondition(
+        () =>
+          getServer()
+            .roomManager.getRoomByCode(
+              activeSession.session.roomCode,
+            )
+            ?.players[0]?.isConnected === false,
+        "Le premier onglet n'a pas ete marque deconnecte.",
+      );
+      expect(timers.pendingCount()).toBe(1);
+
+      const restoredSecondTab = expectSuccess(
+        await restoreSession(
+          secondTab,
+          activeSession.session,
+          SECOND_TEST_CLIENT_INSTANCE_ID,
+        ),
+      );
+      expect(restoredSecondTab.room.players).toEqual([
+        expect.objectContaining({
+          id: activeSession.session.playerId,
+          isHost: true,
+          isConnected: true,
+        }),
+      ]);
+      expect(timers.pendingCount()).toBe(0);
+      expect(
+        getServer().roomManager.getRoomByCode(
+          activeSession.session.roomCode,
+        )?.players[0],
+      ).toMatchObject({
+        socketId: secondTab.id,
+        activeClientInstanceId: SECOND_TEST_CLIENT_INSTANCE_ID,
       });
     },
     TEST_TIMEOUT_MS,

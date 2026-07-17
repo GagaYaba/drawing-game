@@ -132,17 +132,20 @@ export interface PublicRoomState {
 
 export interface CreateRoomPayload {
   nickname: string;
+  clientInstanceId: string;
 }
 
 export interface JoinRoomPayload {
   nickname: string;
   roomCode: string;
+  clientInstanceId: string;
 }
 
 export interface RestoreSessionPayload {
   roomCode: string;
   playerId: string;
   token: string;
+  clientInstanceId: string;
 }
 
 export interface SetPlayerReadyPayload {

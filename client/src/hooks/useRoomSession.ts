@@ -2,12 +2,15 @@ import { useEffect, useRef, useState } from "react";
 
 import {
   SOCKET_EVENTS,
+  type CreateRoomPayload,
   type DrawingDocument,
   type GameCancelledPayload,
   type GamePhase,
   type GuessValue,
+  type JoinRoomPayload,
   type PlayerSessionCredentials,
   type PublicRoomState,
+  type RestoreSessionPayload,
   type RestoreSessionSuccessData,
   type RoomSessionData,
   type SubmitGuessPayload,
@@ -25,6 +28,7 @@ import {
   readStoredGuessDraft,
   writeStoredGuessDraft,
 } from "../session/stored-guess-draft";
+import { getOrCreateClientInstanceId } from "../session/client-instance";
 import {
   clearStoredSession,
   parseStoredSession,
@@ -32,6 +36,10 @@ import {
   writeStoredSession,
   type StoredPlayerSession,
 } from "../session/stored-session";
+import {
+  createManualSessionRestoreGate,
+  type ManualSessionRestoreGate,
+} from "../session/manual-session-restore";
 import { socket } from "../socket/socket";
 
 export interface ClientRoomSession {
@@ -94,8 +102,7 @@ const EMPTY_GUESS_STATE: ClientGuessState = {
 };
 
 const ACTION_TIMEOUT_MS = 8_000;
-const SESSION_RESTORE_RETRY_DELAY_MS = 300;
-const MAX_SESSION_ALREADY_ACTIVE_RETRIES = 1;
+export const SESSION_RESTORE_RETRY_DELAYS_MS = [200, 500, 1_000] as const;
 const REMATCH_READY_NOTICE =
   "La revanche est prête. Indiquez lorsque vous êtes prêt à jouer.";
 const SESSION_RESTORED_ANNOUNCEMENT =
@@ -210,6 +217,47 @@ export function createSubmitGuessPayload(
   return { turnId, value };
 }
 
+export function buildCreateRoomPayload(
+  nickname: string,
+  clientInstanceId: string,
+): CreateRoomPayload {
+  return { nickname, clientInstanceId };
+}
+
+export function buildJoinRoomPayload(
+  nickname: string,
+  roomCode: string,
+  clientInstanceId: string,
+): JoinRoomPayload {
+  return { nickname, roomCode, clientInstanceId };
+}
+
+export function buildRestoreSessionPayload(
+  session: StoredPlayerSession,
+  clientInstanceId: string,
+): RestoreSessionPayload {
+  return { ...session, clientInstanceId };
+}
+
+export function isAutomaticSessionRestoreRetryable(code: string) {
+  return code === "INTERNAL_ERROR";
+}
+
+export function shouldFailManualRestoreOnConnectError(
+  isManualRestoreInFlight: boolean,
+  isRestoreAttemptInFlight: boolean,
+) {
+  return isManualRestoreInFlight && !isRestoreAttemptInFlight;
+}
+
+export function getSessionRestoreRetryDelay(retryIndex: number) {
+  if (!Number.isInteger(retryIndex) || retryIndex < 0) {
+    return null;
+  }
+
+  return SESSION_RESTORE_RETRY_DELAYS_MS[retryIndex] ?? null;
+}
+
 function isGuessValue(value: unknown): value is GuessValue {
   return (
     typeof value === "number" &&
@@ -232,6 +280,11 @@ export function useRoomSession() {
   const [nickname, setNickname] = useState("");
   const [roomCode, setRoomCode] = useState(getInitialRoomCode);
   const [session, setSession] = useState<ClientRoomSession>(EMPTY_SESSION);
+  const clientInstanceIdRef = useRef<string | null>(null);
+  if (clientInstanceIdRef.current === null) {
+    clientInstanceIdRef.current = getOrCreateClientInstanceId();
+  }
+  const clientInstanceId = clientInstanceIdRef.current;
   const storedSessionRef = useRef<StoredPlayerSession | null>(null);
   const storedSessionWasReadRef = useRef(false);
   if (!storedSessionWasReadRef.current) {
@@ -250,9 +303,14 @@ export function useRoomSession() {
   const attachedSocketIdRef = useRef<string | null>(null);
   const restoreActionTokenRef = useRef(0);
   const restoreRetryTimerRef = useRef<number | null>(null);
-  const restoreAlreadyActiveRetryCountRef = useRef(0);
-  const restoreTransportRetryCountRef = useRef(0);
+  const restoreRetryIndexRef = useRef(0);
+  const restoreAttemptInFlightRef = useRef(false);
   const restoreSuppressedRef = useRef(false);
+  const manualRestoreGateRef =
+    useRef<ManualSessionRestoreGate | null>(null);
+  if (manualRestoreGateRef.current === null) {
+    manualRestoreGateRef.current = createManualSessionRestoreGate();
+  }
   const [gameSecrets, setGameSecrets] =
     useState<ClientGameSecrets>(EMPTY_GAME_SECRETS);
   const [guessState, setGuessState] =
@@ -287,6 +345,10 @@ export function useRoomSession() {
         ? null
         : "Restauration de votre session en cours.",
     );
+  const [
+    isRetryingSessionRestore,
+    setIsRetryingSessionRestore,
+  ] = useState(false);
 
   const updateGuessState = (
     update:
@@ -316,6 +378,26 @@ export function useRoomSession() {
     if (restoreRetryTimerRef.current !== null) {
       window.clearTimeout(restoreRetryTimerRef.current);
       restoreRetryTimerRef.current = null;
+    }
+  };
+
+  const finishManualRestore = (updateState = true) => {
+    manualRestoreGateRef.current?.finish();
+    if (updateState) {
+      setIsRetryingSessionRestore(false);
+    }
+  };
+
+  const stopRestoreSequence = (
+    updateManualState = true,
+    preserveManualAttempt = false,
+  ) => {
+    restoreActionTokenRef.current += 1;
+    restoreAttemptInFlightRef.current = false;
+    restoreRetryIndexRef.current = 0;
+    clearRestoreRetryTimer();
+    if (!preserveManualAttempt) {
+      finishManualRestore(updateManualState);
     }
   };
 
@@ -455,6 +537,7 @@ export function useRoomSession() {
     );
 
     if (!currentPlayerIsPresent) {
+      stopRestoreSequence();
       clearTrackedSessionContext();
       clearPendingAction(true);
       attachedSocketIdRef.current = null;
@@ -547,8 +630,7 @@ export function useRoomSession() {
   };
 
   const resetClientSessionAfterRestoreFailure = (message: string) => {
-    restoreActionTokenRef.current += 1;
-    clearRestoreRetryTimer();
+    stopRestoreSequence();
     clearTrackedSessionContext();
     clearPendingAction(true);
     attachedSocketIdRef.current = null;
@@ -565,15 +647,12 @@ export function useRoomSession() {
   };
 
   const pauseClientSessionAfterRestoreFailure = (message: string) => {
-    restoreActionTokenRef.current += 1;
-    clearRestoreRetryTimer();
+    stopRestoreSequence();
     clearPendingAction(true);
     attachedSocketIdRef.current = null;
     restoreSuppressedRef.current = true;
 
-    if (socket.connected) {
-      socket.disconnect();
-    }
+    socket.disconnect();
 
     setErrorMessage(message);
     setConnectionAnnouncement(message);
@@ -684,8 +763,7 @@ export function useRoomSession() {
     applyRoomState(data.room);
     applyRestoredPrivateState(data);
     attachedSocketIdRef.current = socket.id ?? null;
-    restoreAlreadyActiveRetryCountRef.current = 0;
-    restoreTransportRetryCountRef.current = 0;
+    stopRestoreSequence();
     restoreSuppressedRef.current = false;
     setStorageWarning(
       credentialStorage === "memory-only"
@@ -697,7 +775,26 @@ export function useRoomSession() {
     updateConnectionStatus("connected");
   };
 
-  const restoreSession = () => {
+  const scheduleTransientRestoreRetry = (failureMessage: string) => {
+    const retryDelay = getSessionRestoreRetryDelay(
+      restoreRetryIndexRef.current,
+    );
+    if (retryDelay === null) {
+      pauseClientSessionAfterRestoreFailure(failureMessage);
+      return;
+    }
+
+    restoreRetryIndexRef.current += 1;
+    setConnectionAnnouncement(
+      "La restauration prend plus de temps que prévu. Nouvelle tentative en cours.",
+    );
+    restoreRetryTimerRef.current = window.setTimeout(() => {
+      restoreRetryTimerRef.current = null;
+      restoreSession();
+    }, retryDelay);
+  };
+
+  function restoreSession() {
     const storedSession = storedSessionRef.current;
     if (!socket.connected) {
       return;
@@ -708,6 +805,7 @@ export function useRoomSession() {
     }
 
     if (storedSession === null) {
+      stopRestoreSequence();
       attachedSocketIdRef.current = null;
       updateConnectionStatus("connected");
       return;
@@ -717,11 +815,17 @@ export function useRoomSession() {
       attachedSocketIdRef.current !== null &&
       attachedSocketIdRef.current === socket.id
     ) {
+      stopRestoreSequence();
       updateConnectionStatus("connected");
       return;
     }
 
+    if (restoreAttemptInFlightRef.current) {
+      return;
+    }
+
     clearRestoreRetryTimer();
+    restoreAttemptInFlightRef.current = true;
     restoreActionTokenRef.current += 1;
     const restoreActionToken = restoreActionTokenRef.current;
     updateConnectionStatus("restoring");
@@ -729,29 +833,22 @@ export function useRoomSession() {
 
     socket.timeout(ACTION_TIMEOUT_MS).emit(
       SOCKET_EVENTS.SESSION_RESTORE,
-      storedSession,
+      buildRestoreSessionPayload(
+        storedSession,
+        clientInstanceId,
+      ),
       (timeoutError, result) => {
-        if (
-          restoreActionToken !== restoreActionTokenRef.current ||
-          !socket.connected
-        ) {
+        if (restoreActionToken !== restoreActionTokenRef.current) {
+          return;
+        }
+
+        restoreAttemptInFlightRef.current = false;
+        if (!socket.connected) {
           return;
         }
 
         if (timeoutError) {
-          if (restoreTransportRetryCountRef.current < 1) {
-            restoreTransportRetryCountRef.current += 1;
-            attachedSocketIdRef.current = null;
-            updateConnectionStatus("disconnected");
-            setConnectionAnnouncement(
-              "La restauration prend plus de temps que prévu. Nouvelle tentative en cours.",
-            );
-            socket.disconnect();
-            socket.connect();
-            return;
-          }
-
-          pauseClientSessionAfterRestoreFailure(
+          scheduleTransientRestoreRetry(
             "Impossible de restaurer la session pour le moment.",
           );
           return;
@@ -772,50 +869,51 @@ export function useRoomSession() {
           return;
         }
 
-        if (
-          result.error.code === "SESSION_ALREADY_ACTIVE" &&
-          restoreAlreadyActiveRetryCountRef.current <
-            MAX_SESSION_ALREADY_ACTIVE_RETRIES
-        ) {
-          restoreAlreadyActiveRetryCountRef.current += 1;
-          restoreRetryTimerRef.current = window.setTimeout(() => {
-            restoreRetryTimerRef.current = null;
-            restoreSession();
-          }, SESSION_RESTORE_RETRY_DELAY_MS);
+        if (isPermanentSessionRestoreError(result.error.code)) {
+          resetClientSessionAfterRestoreFailure(result.error.message);
           return;
         }
 
-        if (isPermanentSessionRestoreError(result.error.code)) {
-          resetClientSessionAfterRestoreFailure(result.error.message);
+        if (isAutomaticSessionRestoreRetryable(result.error.code)) {
+          scheduleTransientRestoreRetry(result.error.message);
           return;
         }
 
         pauseClientSessionAfterRestoreFailure(result.error.message);
       },
     );
-  };
+  }
 
   const retrySessionRestore = () => {
-    if (storedSessionRef.current === null) {
-      return;
+    const manualRestoreGate = manualRestoreGateRef.current;
+    if (
+      storedSessionRef.current === null ||
+      manualRestoreGate === null ||
+      restoreAttemptInFlightRef.current ||
+      connectionStatusRef.current !== "restore-failed"
+    ) {
+      return false;
     }
 
-    restoreActionTokenRef.current += 1;
-    clearRestoreRetryTimer();
-    restoreAlreadyActiveRetryCountRef.current = 0;
-    restoreTransportRetryCountRef.current = 0;
+    if (!manualRestoreGate.begin()) {
+      return false;
+    }
+
+    stopRestoreSequence(true, true);
     restoreSuppressedRef.current = false;
     attachedSocketIdRef.current = null;
+    setIsRetryingSessionRestore(true);
     setErrorMessage(null);
     setConnectionAnnouncement("Restauration de votre session en cours.");
     updateConnectionStatus("restoring");
 
     if (socket.connected) {
       restoreSession();
-      return;
+      return true;
     }
 
     socket.connect();
+    return true;
   };
 
   useEffect(() => {
@@ -870,6 +968,7 @@ export function useRoomSession() {
       const canRestoreSession = storedSessionRef.current !== null;
 
       restoreActionTokenRef.current += 1;
+      restoreAttemptInFlightRef.current = false;
       clearRestoreRetryTimer();
       attachedSocketIdRef.current = null;
       clearPendingAction(true);
@@ -912,6 +1011,18 @@ export function useRoomSession() {
 
     const handleConnectError = () => {
       if (
+        shouldFailManualRestoreOnConnectError(
+          manualRestoreGateRef.current?.isInFlight() === true,
+          restoreAttemptInFlightRef.current,
+        )
+      ) {
+        pauseClientSessionAfterRestoreFailure(
+          "Impossible de se reconnecter au serveur pour restaurer la session.",
+        );
+        return;
+      }
+
+      if (
         currentPlayerIdRef.current !== null ||
         storedSessionRef.current !== null
       ) {
@@ -936,8 +1047,7 @@ export function useRoomSession() {
     }
 
     return () => {
-      restoreActionTokenRef.current += 1;
-      clearRestoreRetryTimer();
+      stopRestoreSequence(false);
       socket.off(SOCKET_EVENTS.ROOM_STATE, handleRoomState);
       socket.off(SOCKET_EVENTS.TURN_SECRET, handleTurnSecret);
       socket.off(SOCKET_EVENTS.GAME_CANCELLED, handleGameCancelled);
@@ -956,10 +1066,7 @@ export function useRoomSession() {
       return false;
     }
 
-    restoreActionTokenRef.current += 1;
-    clearRestoreRetryTimer();
-    restoreAlreadyActiveRetryCountRef.current = 0;
-    restoreTransportRetryCountRef.current = 0;
+    stopRestoreSequence();
     restoreSuppressedRef.current = false;
     attachedSocketIdRef.current = null;
 
@@ -1052,9 +1159,8 @@ export function useRoomSession() {
       );
       return false;
     }
+    stopRestoreSequence();
     restoreSuppressedRef.current = false;
-    restoreAlreadyActiveRetryCountRef.current = 0;
-    restoreTransportRetryCountRef.current = 0;
     currentPlayerIdRef.current = data.session.playerId;
     attachedSocketIdRef.current = socket.id ?? null;
     setRoomCode(data.session.roomCode);
@@ -1094,7 +1200,10 @@ export function useRoomSession() {
 
     socket.timeout(ACTION_TIMEOUT_MS).emit(
       SOCKET_EVENTS.ROOM_CREATE,
-      { nickname: normalizedNickname },
+      buildCreateRoomPayload(
+        normalizedNickname,
+        clientInstanceId,
+      ),
       (timeoutError, result) => {
         if (actionToken !== actionTokenRef.current) {
           return;
@@ -1143,7 +1252,11 @@ export function useRoomSession() {
 
     socket.timeout(ACTION_TIMEOUT_MS).emit(
       SOCKET_EVENTS.ROOM_JOIN,
-      { nickname: normalizedNickname, roomCode: normalizedRoomCode },
+      buildJoinRoomPayload(
+        normalizedNickname,
+        normalizedRoomCode,
+        clientInstanceId,
+      ),
       (timeoutError, result) => {
         if (actionToken !== actionTokenRef.current) {
           return;
@@ -1674,6 +1787,7 @@ export function useRoomSession() {
         }
 
         setErrorMessage(null);
+        stopRestoreSequence();
         clearTrackedSessionContext();
         attachedSocketIdRef.current = null;
         clearPersistedPrivateState();
@@ -1699,6 +1813,7 @@ export function useRoomSession() {
     noticeMessage,
     connectionStatus,
     connectionAnnouncement,
+    isRetryingSessionRestore,
     hasStoredSession: storedSessionRef.current !== null,
     isConnectionBlocked:
       connectionStatus === "disconnected" ||

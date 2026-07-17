@@ -14,6 +14,7 @@ export type { RoomErrorCode } from "@drawing-game/shared";
 export interface InternalPlayer {
   id: string;
   socketId: string | null;
+  activeClientInstanceId: string;
   nickname: string;
   isHost: boolean;
   isReady: boolean;
@@ -66,7 +67,10 @@ export interface RestoreSessionRequest extends RestoreSessionPayload {
   restoredAt: number;
 }
 
-export type RestoreSessionResult = RestoreSessionSuccessData;
+export interface RestoreSessionResult {
+  data: RestoreSessionSuccessData;
+  supersededSocketId: string | null;
+}
 
 export interface RoomDepartureResult {
   roomCode: string;

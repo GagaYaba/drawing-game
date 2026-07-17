@@ -8,6 +8,10 @@ import {
   isValidReconnectGraceMs,
 } from "../src/sessions/reconnect-manager.js";
 import { SessionRestorationManager } from "../src/sessions/session-restoration.js";
+import {
+  SECOND_TEST_CLIENT_INSTANCE_ID,
+  TEST_CLIENT_INSTANCE_ID,
+} from "./test-client-instance.js";
 
 const ROOM_CODE = "7KXMP";
 
@@ -58,10 +62,19 @@ function createManagers(playerCount = 1) {
     idGenerator: () => `player-${++nextPlayerId}`,
     clock: () => 100,
   });
-  const host = roomManager.createRoom("socket-1", "J1");
+  const host = roomManager.createRoom(
+    "socket-1",
+    "J1",
+    TEST_CLIENT_INSTANCE_ID,
+  );
 
   for (let index = 2; index <= playerCount; index += 1) {
-    roomManager.joinRoom(`socket-${index}`, `J${index}`, ROOM_CODE);
+    roomManager.joinRoom(
+      `socket-${index}`,
+      `J${index}`,
+      ROOM_CODE,
+      TEST_CLIENT_INSTANCE_ID,
+    );
   }
 
   const gameManager = new GameManager(roomManager, {
@@ -198,11 +211,14 @@ describe("ReconnectManager", () => {
     now = 2_030;
     const restored = restorationManager.restoreSession(
       "socket-restored",
-      host.session,
+      {
+        ...host.session,
+        clientInstanceId: SECOND_TEST_CLIENT_INSTANCE_ID,
+      },
     );
 
-    expect(restored.session).toEqual(host.session);
-    expect(restored.room.players[0]).toMatchObject({
+    expect(restored.data.session).toEqual(host.session);
+    expect(restored.data.room.players[0]).toMatchObject({
       id: host.session.playerId,
       isHost: true,
       isConnected: true,
@@ -222,10 +238,59 @@ describe("ReconnectManager", () => {
           {
             ...host.session,
             token: `${host.session.token.startsWith("A") ? "B" : "A"}${host.session.token.slice(1)}`,
+            clientInstanceId: SECOND_TEST_CLIENT_INSTANCE_ID,
           },
         ),
       "INVALID_SESSION",
     );
+  });
+
+  it("ignore la deconnexion tardive du socket remplace sans creer de timer", () => {
+    let now = 2_500;
+    const timers = createManualTimers();
+    const { roomManager, gameManager, host } = createManagers(2);
+    const reconnectManager = new ReconnectManager(
+      roomManager,
+      gameManager,
+      {
+        graceMs: 60,
+        clock: () => now,
+        scheduleTimer: timers.scheduleTimer,
+        clearTimer: timers.clearTimer,
+      },
+    );
+    const restorationManager = new SessionRestorationManager(
+      roomManager,
+      reconnectManager,
+      { clock: () => now },
+    );
+
+    const restored = restorationManager.restoreSession(
+      "socket-refreshed",
+      {
+        ...host.session,
+        clientInstanceId: TEST_CLIENT_INSTANCE_ID,
+      },
+    );
+
+    expect(restored.supersededSocketId).toBe("socket-1");
+    expect(reconnectManager.getPendingTimerCount()).toBe(0);
+    expect(timers.pendingCount()).toBe(0);
+
+    now = 2_510;
+    expect(
+      reconnectManager.markPlayerDisconnected("socket-1"),
+    ).toBeNull();
+    expect(reconnectManager.getPendingTimerCount()).toBe(0);
+    expect(timers.pendingCount()).toBe(0);
+    expect(
+      roomManager.getRoomByCode(ROOM_CODE)?.players[0],
+    ).toMatchObject({
+      id: host.session.playerId,
+      socketId: "socket-refreshed",
+      isConnected: true,
+      reconnectDeadline: null,
+    });
   });
 
   it("annule une phase active uniquement à l’expiration", () => {

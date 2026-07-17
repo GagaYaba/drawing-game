@@ -25,6 +25,12 @@ import {
   writeStoredGuessDraft,
 } from "../../client/src/session/stored-guess-draft.js";
 import {
+  CLIENT_INSTANCE_STORAGE_KEY,
+  getOrCreateClientInstanceId,
+  isClientInstanceId,
+  readClientInstanceId,
+} from "../../client/src/session/client-instance.js";
+import {
   type BrowserStorage,
   clearStoredSession,
   readStoredSession,
@@ -48,6 +54,9 @@ class MemoryBrowserStorage implements BrowserStorage {
   }
 }
 
+const CLIENT_INSTANCE_ID = "11111111-1111-4111-8111-111111111111";
+const OTHER_CLIENT_INSTANCE_ID =
+  "22222222-2222-4222-a222-222222222222";
 const SESSION_TOKEN = "a".repeat(43);
 const SESSION: PlayerSessionCredentials = {
   roomCode: "ABCDE",
@@ -93,6 +102,7 @@ const GUESS_DRAFT: StoredGuessDraft = {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("stored player session", () => {
@@ -136,6 +146,120 @@ describe("stored player session", () => {
       expect(spy).not.toHaveBeenCalled();
       expect(JSON.stringify(spy.mock.calls)).not.toContain(SESSION_TOKEN);
     }
+  });
+});
+
+describe("client instance id", () => {
+  it("utilise sessionStorage par défaut sans écrire dans localStorage", () => {
+    const sessionStorage = new MemoryBrowserStorage();
+    const localStorage = new MemoryBrowserStorage();
+    vi.stubGlobal("window", { sessionStorage, localStorage });
+
+    expect(
+      getOrCreateClientInstanceId(
+        undefined,
+        () => CLIENT_INSTANCE_ID,
+      ),
+    ).toBe(CLIENT_INSTANCE_ID);
+    expect(sessionStorage.getItem(CLIENT_INSTANCE_STORAGE_KEY)).toBe(
+      CLIENT_INSTANCE_ID,
+    );
+    expect(localStorage.getItem(CLIENT_INSTANCE_STORAGE_KEY)).toBeNull();
+  });
+
+  it("crée l'identifiant dans le stockage de session puis le conserve après actualisation", () => {
+    const storage = new MemoryBrowserStorage();
+    const firstFactory = vi.fn(() => CLIENT_INSTANCE_ID);
+    const refreshFactory = vi.fn(() => OTHER_CLIENT_INSTANCE_ID);
+
+    expect(getOrCreateClientInstanceId(storage, firstFactory)).toBe(
+      CLIENT_INSTANCE_ID,
+    );
+    expect(getOrCreateClientInstanceId(storage, refreshFactory)).toBe(
+      CLIENT_INSTANCE_ID,
+    );
+    expect(readClientInstanceId(storage)).toBe(CLIENT_INSTANCE_ID);
+    expect(storage.getItem(CLIENT_INSTANCE_STORAGE_KEY)).toBe(
+      CLIENT_INSTANCE_ID,
+    );
+    expect(firstFactory).toHaveBeenCalledOnce();
+    expect(refreshFactory).not.toHaveBeenCalled();
+  });
+
+  it("crée des identifiants distincts dans deux contextes d'onglet", () => {
+    const firstTabStorage = new MemoryBrowserStorage();
+    const secondTabStorage = new MemoryBrowserStorage();
+
+    expect(
+      getOrCreateClientInstanceId(
+        firstTabStorage,
+        () => CLIENT_INSTANCE_ID,
+      ),
+    ).toBe(CLIENT_INSTANCE_ID);
+    expect(
+      getOrCreateClientInstanceId(
+        secondTabStorage,
+        () => OTHER_CLIENT_INSTANCE_ID,
+      ),
+    ).toBe(OTHER_CLIENT_INSTANCE_ID);
+  });
+
+  it("remplace sans erreur un identifiant de stockage corrompu", () => {
+    const storage = new MemoryBrowserStorage();
+    storage.setItem(CLIENT_INSTANCE_STORAGE_KEY, "not-a-uuid");
+
+    expect(readClientInstanceId(storage)).toBeNull();
+    expect(storage.getItem(CLIENT_INSTANCE_STORAGE_KEY)).toBeNull();
+    expect(
+      getOrCreateClientInstanceId(
+        storage,
+        () => CLIENT_INSTANCE_ID,
+      ),
+    ).toBe(CLIENT_INSTANCE_ID);
+  });
+
+  it("reste utilisable en mémoire lorsque sessionStorage est absent", () => {
+    expect(
+      getOrCreateClientInstanceId(
+        null,
+        () => CLIENT_INSTANCE_ID,
+      ),
+    ).toBe(CLIENT_INSTANCE_ID);
+  });
+
+  it("ne plante pas lorsque le stockage de session refuse tout accès", () => {
+    const unavailableStorage: BrowserStorage = {
+      getItem: () => {
+        throw new Error("storage unavailable");
+      },
+      setItem: () => {
+        throw new Error("storage unavailable");
+      },
+      removeItem: () => {
+        throw new Error("storage unavailable");
+      },
+    };
+
+    expect(readClientInstanceId(unavailableStorage)).toBeNull();
+    expect(
+      getOrCreateClientInstanceId(
+        unavailableStorage,
+        () => CLIENT_INSTANCE_ID,
+      ),
+    ).toBe(CLIENT_INSTANCE_ID);
+  });
+
+  it("valide strictement les UUID v4", () => {
+    expect(isClientInstanceId(CLIENT_INSTANCE_ID)).toBe(true);
+    expect(
+      isClientInstanceId("11111111-1111-5111-8111-111111111111"),
+    ).toBe(false);
+    expect(
+      isClientInstanceId("11111111-1111-4111-7111-111111111111"),
+    ).toBe(false);
+    expect(() =>
+      getOrCreateClientInstanceId(null, () => "invalid"),
+    ).toThrow(/invalid UUID/u);
   });
 });
 

@@ -5,6 +5,8 @@ import type {
   SetPlayerReadyPayload,
 } from "@drawing-game/shared";
 
+import { isValidClientInstanceId } from "../sessions/client-instance-validation.js";
+
 type PayloadValidationResult<T> =
   | { success: true; data: T }
   | {
@@ -15,14 +17,70 @@ type PayloadValidationResult<T> =
       };
     };
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
+function isPlainRecord(
+  value: unknown,
+): value is Record<string, unknown> {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  try {
+    const prototype = Object.getPrototypeOf(value);
+    return prototype === Object.prototype || prototype === null;
+  } catch {
+    return false;
+  }
+}
+
+function hasExactOwnKeys(
+  payload: Record<string, unknown>,
+  expectedKeys: readonly string[],
+): boolean {
+  try {
+    const keys = Reflect.ownKeys(payload);
+
+    return (
+      keys.length === expectedKeys.length &&
+      expectedKeys.every((key) =>
+        Object.prototype.hasOwnProperty.call(payload, key),
+      )
+    );
+  } catch {
+    return false;
+  }
+}
+
+function readOwnValue(
+  payload: Record<string, unknown>,
+  key: string,
+): unknown {
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(payload, key);
+    return descriptor !== undefined && "value" in descriptor
+      ? descriptor.value
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function invalidClientInstance<T>(): PayloadValidationResult<T> {
+  return {
+    success: false,
+    error: {
+      code: "INVALID_SESSION",
+      message: "L’instance cliente est invalide.",
+    },
+  };
 }
 
 export function validateCreateRoomPayload(
   payload: unknown,
 ): PayloadValidationResult<CreateRoomPayload> {
-  if (!isRecord(payload) || typeof payload.nickname !== "string") {
+  if (
+    !isPlainRecord(payload) ||
+    !hasExactOwnKeys(payload, ["nickname", "clientInstanceId"])
+  ) {
     return {
       success: false,
       error: {
@@ -32,13 +90,37 @@ export function validateCreateRoomPayload(
     };
   }
 
-  return { success: true, data: { nickname: payload.nickname } };
+  const nickname = readOwnValue(payload, "nickname");
+  const clientInstanceId = readOwnValue(payload, "clientInstanceId");
+
+  if (typeof nickname !== "string") {
+    return {
+      success: false,
+      error: {
+        code: "INVALID_NICKNAME",
+        message: "Le pseudonyme est obligatoire.",
+      },
+    };
+  }
+
+  if (!isValidClientInstanceId(clientInstanceId)) {
+    return invalidClientInstance();
+  }
+
+  return { success: true, data: { nickname, clientInstanceId } };
 }
 
 export function validateJoinRoomPayload(
   payload: unknown,
 ): PayloadValidationResult<JoinRoomPayload> {
-  if (!isRecord(payload) || typeof payload.nickname !== "string") {
+  if (
+    !isPlainRecord(payload) ||
+    !hasExactOwnKeys(payload, [
+      "nickname",
+      "roomCode",
+      "clientInstanceId",
+    ])
+  ) {
     return {
       success: false,
       error: {
@@ -48,7 +130,21 @@ export function validateJoinRoomPayload(
     };
   }
 
-  if (typeof payload.roomCode !== "string") {
+  const nickname = readOwnValue(payload, "nickname");
+  const roomCode = readOwnValue(payload, "roomCode");
+  const clientInstanceId = readOwnValue(payload, "clientInstanceId");
+
+  if (typeof nickname !== "string") {
+    return {
+      success: false,
+      error: {
+        code: "INVALID_NICKNAME",
+        message: "Le pseudonyme est obligatoire.",
+      },
+    };
+  }
+
+  if (typeof roomCode !== "string") {
     return {
       success: false,
       error: {
@@ -58,16 +154,20 @@ export function validateJoinRoomPayload(
     };
   }
 
+  if (!isValidClientInstanceId(clientInstanceId)) {
+    return invalidClientInstance();
+  }
+
   return {
     success: true,
-    data: { nickname: payload.nickname, roomCode: payload.roomCode },
+    data: { nickname, roomCode, clientInstanceId },
   };
 }
 
 export function validateSetPlayerReadyPayload(
   payload: unknown,
 ): PayloadValidationResult<SetPlayerReadyPayload> {
-  if (!isRecord(payload) || typeof payload.isReady !== "boolean") {
+  if (!isPlainRecord(payload) || typeof payload.isReady !== "boolean") {
     return {
       success: false,
       error: {

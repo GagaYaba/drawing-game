@@ -15,6 +15,7 @@ import { io as createSocketClient, type Socket } from "socket.io-client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { createDrawingGameServer } from "../src/create-server.js";
+import { TEST_CLIENT_INSTANCE_ID } from "./test-client-instance.js";
 
 type TestClient = Socket<ServerToClientEvents, ClientToServerEvents>;
 type DrawingGameServer = ReturnType<typeof createDrawingGameServer>;
@@ -65,7 +66,11 @@ function createRoom(
   nickname: string,
 ): Promise<ActionResult<RoomSessionData>> {
   return waitForAcknowledgement((acknowledge) => {
-    socket.emit(SOCKET_EVENTS.ROOM_CREATE, { nickname }, acknowledge);
+    socket.emit(
+      SOCKET_EVENTS.ROOM_CREATE,
+      { nickname, clientInstanceId: TEST_CLIENT_INSTANCE_ID },
+      acknowledge,
+    );
   });
 }
 
@@ -77,7 +82,11 @@ function joinRoom(
   return waitForAcknowledgement((acknowledge) => {
     socket.emit(
       SOCKET_EVENTS.ROOM_JOIN,
-      { nickname, roomCode },
+      {
+        nickname,
+        roomCode,
+        clientInstanceId: TEST_CLIENT_INSTANCE_ID,
+      },
       acknowledge,
     );
   });
@@ -379,6 +388,26 @@ describe("Socket.IO room integration", () => {
         "INVALID_NICKNAME",
       );
       expectError(
+        await emitRawAction<RoomSessionData>(
+          socket,
+          SOCKET_EVENTS.ROOM_CREATE,
+          { nickname: "Alice", clientInstanceId: "not-a-uuid" },
+        ),
+        "INVALID_SESSION",
+      );
+      expectError(
+        await emitRawAction<RoomSessionData>(
+          socket,
+          SOCKET_EVENTS.ROOM_CREATE,
+          {
+            nickname: "Alice",
+            clientInstanceId: TEST_CLIENT_INSTANCE_ID,
+            unexpected: true,
+          },
+        ),
+        "INVALID_NICKNAME",
+      );
+      expectError(
         await emitRawAction<PublicRoomState>(
           socket,
           SOCKET_EVENTS.PLAYER_SET_READY,
@@ -395,6 +424,31 @@ describe("Socket.IO room integration", () => {
         await emitRawActionWithoutPayload<RoomSessionData>(
           otherSocket,
           SOCKET_EVENTS.ROOM_JOIN,
+        ),
+        "INVALID_NICKNAME",
+      );
+      expectError(
+        await emitRawAction<RoomSessionData>(
+          otherSocket,
+          SOCKET_EVENTS.ROOM_JOIN,
+          {
+            nickname: "Bob",
+            roomCode: created.session.roomCode,
+            clientInstanceId: "not-a-uuid",
+          },
+        ),
+        "INVALID_SESSION",
+      );
+      expectError(
+        await emitRawAction<RoomSessionData>(
+          otherSocket,
+          SOCKET_EVENTS.ROOM_JOIN,
+          {
+            nickname: "Bob",
+            roomCode: created.session.roomCode,
+            clientInstanceId: TEST_CLIENT_INSTANCE_ID,
+            unexpected: true,
+          },
         ),
         "INVALID_NICKNAME",
       );

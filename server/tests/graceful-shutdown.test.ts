@@ -10,6 +10,7 @@ import {
   type ShutdownSignal,
 } from "../src/shutdown/graceful-shutdown.js";
 import { createDrawingGameServer } from "../src/create-server.js";
+import { TEST_CLIENT_INSTANCE_ID } from "./test-client-instance.js";
 
 const FORCE_SHUTDOWN_DELAY_MS = 25_000;
 
@@ -347,10 +348,24 @@ describe("drawing game server disposal", () => {
       },
     });
 
-    const created = server.roomManager.createRoom("socket-1", "J1");
+    const created = server.roomManager.createRoom(
+      "socket-1",
+      "J1",
+      TEST_CLIENT_INSTANCE_ID,
+    );
     const roomCode = created.session.roomCode;
-    server.roomManager.joinRoom("socket-2", "J2", roomCode);
-    server.roomManager.joinRoom("socket-3", "J3", roomCode);
+    server.roomManager.joinRoom(
+      "socket-2",
+      "J2",
+      roomCode,
+      TEST_CLIENT_INSTANCE_ID,
+    );
+    server.roomManager.joinRoom(
+      "socket-3",
+      "J3",
+      roomCode,
+      TEST_CLIENT_INSTANCE_ID,
+    );
     server.roomManager.setPlayerReady("socket-1", true);
     server.roomManager.setPlayerReady("socket-2", true);
     server.roomManager.setPlayerReady("socket-3", true);

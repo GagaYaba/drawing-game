@@ -15,7 +15,6 @@ import {
   type GameCancelledPayload,
   type PublicRoomState,
   type RequestRematchSuccessData,
-  type RestoreSessionPayload,
   type RestoreSessionSuccessData,
   type RoomErrorCode,
   type RoomSessionData,
@@ -28,6 +27,10 @@ import { io as createSocketClient, type Socket } from "socket.io-client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { createDrawingGameServer } from "../src/create-server.js";
+import {
+  SECOND_TEST_CLIENT_INSTANCE_ID,
+  TEST_CLIENT_INSTANCE_ID,
+} from "./test-client-instance.js";
 
 type TestClient = Socket<ServerToClientEvents, ClientToServerEvents>;
 type DrawingGameServer = ReturnType<typeof createDrawingGameServer>;
@@ -101,9 +104,14 @@ function expectError<T>(
 function createRoom(
   socket: TestClient,
   nickname: string,
+  clientInstanceId = TEST_CLIENT_INSTANCE_ID,
 ): Promise<ActionResult<RoomSessionData>> {
   return waitForAcknowledgement((acknowledge) => {
-    socket.emit(SOCKET_EVENTS.ROOM_CREATE, { nickname }, acknowledge);
+    socket.emit(
+      SOCKET_EVENTS.ROOM_CREATE,
+      { nickname, clientInstanceId },
+      acknowledge,
+    );
   });
 }
 
@@ -111,11 +119,12 @@ function joinRoom(
   socket: TestClient,
   nickname: string,
   roomCode: string,
+  clientInstanceId = TEST_CLIENT_INSTANCE_ID,
 ): Promise<ActionResult<RoomSessionData>> {
   return waitForAcknowledgement((acknowledge) => {
     socket.emit(
       SOCKET_EVENTS.ROOM_JOIN,
-      { nickname, roomCode },
+      { nickname, roomCode, clientInstanceId },
       acknowledge,
     );
   });
@@ -123,10 +132,15 @@ function joinRoom(
 
 function restoreSession(
   socket: TestClient,
-  session: RestoreSessionPayload,
+  session: RoomSessionData["session"],
+  clientInstanceId = SECOND_TEST_CLIENT_INSTANCE_ID,
 ): Promise<ActionResult<RestoreSessionSuccessData>> {
   return waitForAcknowledgement((acknowledge) => {
-    socket.emit(SOCKET_EVENTS.SESSION_RESTORE, session, acknowledge);
+    socket.emit(
+      SOCKET_EVENTS.SESSION_RESTORE,
+      { ...session, clientInstanceId },
+      acknowledge,
+    );
   });
 }
 
@@ -605,22 +619,19 @@ describe("Socket.IO session restoration", () => {
       const drawerIndex = room.sessions.findIndex(
         (session) => session.playerId === drawerId,
       );
-      const observer = room.sockets[(drawerIndex + 1) % room.sockets.length]!;
-      const disconnectedState = waitForDisconnectedPlayer(
-        observer,
-        room.roomCode,
-        drawerId,
-      );
-      room.sockets[drawerIndex]!.disconnect();
-      await disconnectedState;
-
+      const originalDrawerSocket = room.sockets[drawerIndex]!;
       const restoredSocket = await connectClient();
+      const originalSocketDisconnected = new Promise<void>((resolve) => {
+        originalDrawerSocket.once("disconnect", () => resolve());
+      });
       const restored = expectSuccess(
         await restoreSession(
           restoredSocket,
           room.sessions[drawerIndex]!,
+          TEST_CLIENT_INSTANCE_ID,
         ),
       );
+      await originalSocketDisconnected;
 
       expect(restored.privateState).toMatchObject({
         gameId: drawing.game!.gameId,
@@ -628,6 +639,11 @@ describe("Socket.IO session restoration", () => {
         secretLevel: 7,
         isCurrentDrawer: true,
       });
+      expect(restored.room.game?.phase).toBe("DRAWING");
+      expect(restored.room.players).toHaveLength(3);
+      expect(
+        server?.reconnectManager.getPendingTimerCount(),
+      ).toBe(0);
       const voting = expectSuccess(
         await submitDrawing(restoredSocket),
       ).room;
@@ -675,25 +691,26 @@ describe("Socket.IO session restoration", () => {
           5,
         ),
       );
-      const disconnectedAfterGuess = waitForDisconnectedPlayer(
-        observer,
-        room.roomCode,
-        room.sessions[voterIndex]!.playerId,
-      );
-      firstRestoredSocket.disconnect();
-      await disconnectedAfterGuess;
-
       const secondRestoredSocket = await connectClient();
+      const firstRestoredDisconnected = new Promise<void>((resolve) => {
+        firstRestoredSocket.once("disconnect", () => resolve());
+      });
       const restoredAfterGuess = expectSuccess(
         await restoreSession(
           secondRestoredSocket,
           room.sessions[voterIndex]!,
+          SECOND_TEST_CLIENT_INSTANCE_ID,
         ),
       );
+      await firstRestoredDisconnected;
 
       expect(restoredAfterGuess.privateState.submittedGuess).toEqual(
         submitted,
       );
+      expect(restoredAfterGuess.room.players).toHaveLength(3);
+      expect(
+        server?.reconnectManager.getPendingTimerCount(),
+      ).toBe(0);
       expectError(
         await submitGuess(
           secondRestoredSocket,
@@ -730,20 +747,33 @@ describe("Socket.IO session restoration", () => {
         ),
       );
       await revealState;
-      const hostDisconnected = waitForDisconnectedPlayer(
-        revealRoom.sockets[1]!,
-        revealRoom.roomCode,
-        revealRoom.sessions[0]!.playerId,
-      );
-      revealRoom.sockets[0]!.disconnect();
-      await hostDisconnected;
       const restoredRevealHost = await connectClient();
-      expectSuccess(
+      const originalRevealHostDisconnected = new Promise<void>(
+        (resolve) => {
+          revealRoom.sockets[0]!.once("disconnect", () => resolve());
+        },
+      );
+      const revealRestoration = expectSuccess(
         await restoreSession(
           restoredRevealHost,
           revealRoom.sessions[0]!,
+          TEST_CLIENT_INSTANCE_ID,
         ),
       );
+      await originalRevealHostDisconnected;
+      expect(revealRestoration.room.game?.phase).toBe("REVEAL");
+      expect(
+        revealRestoration.room.players.find(
+          (player) =>
+            player.id === revealRoom.sessions[0]!.playerId,
+        ),
+      ).toMatchObject({
+        isHost: true,
+        isConnected: true,
+      });
+      expect(
+        server?.reconnectManager.getPendingTimerCount(),
+      ).toBe(0);
       expect(
         expectSuccess(await continueGame(restoredRevealHost)).room.game
           ?.phase,
@@ -752,20 +782,28 @@ describe("Socket.IO session restoration", () => {
       const finishedRoom = await prepareRoom();
       const finished = await finishGame(finishedRoom);
       expect(finished.game?.phase).toBe("FINISHED");
-      const finishedHostDisconnected = waitForDisconnectedPlayer(
-        finishedRoom.sockets[1]!,
-        finishedRoom.roomCode,
-        finishedRoom.sessions[0]!.playerId,
-      );
-      finishedRoom.sockets[0]!.disconnect();
-      await finishedHostDisconnected;
       const restoredFinishedHost = await connectClient();
-      expectSuccess(
+      const originalFinishedHostDisconnected = new Promise<void>(
+        (resolve) => {
+          finishedRoom.sockets[0]!.once(
+            "disconnect",
+            () => resolve(),
+          );
+        },
+      );
+      const finishedRestoration = expectSuccess(
         await restoreSession(
           restoredFinishedHost,
           finishedRoom.sessions[0]!,
+          TEST_CLIENT_INSTANCE_ID,
         ),
       );
+      await originalFinishedHostDisconnected;
+      expect(finishedRestoration.room.game?.phase).toBe("FINISHED");
+      expect(finishedRestoration.room.players).toHaveLength(3);
+      expect(
+        server?.reconnectManager.getPendingTimerCount(),
+      ).toBe(0);
       const rematch = expectSuccess(
         await requestRematch(restoredFinishedHost),
       );

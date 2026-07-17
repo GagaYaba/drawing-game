@@ -19,6 +19,7 @@ import type {
   InternalGame,
 } from "../src/game/game-types.js";
 import type { InternalPlayer } from "../src/rooms/room-types.js";
+import { TEST_CLIENT_INSTANCE_ID } from "./test-client-instance.js";
 
 const PROMPT: DrawingPrompt = {
   id: "score-prompt",
@@ -51,6 +52,7 @@ function createPlayers(
   return scores.map((score, index) => ({
     id: `player-${index + 1}`,
     socketId: `socket-${index + 1}`,
+    activeClientInstanceId: TEST_CLIENT_INSTANCE_ID,
     nickname: `J${index + 1}`,
     isHost: index === 0,
     isReady: true,

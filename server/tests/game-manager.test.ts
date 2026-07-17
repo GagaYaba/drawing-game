@@ -15,6 +15,7 @@ import {
   RoomManager,
   RoomManagerError,
 } from "../src/rooms/room-manager.js";
+import { TEST_CLIENT_INSTANCE_ID } from "./test-client-instance.js";
 
 const ROOM_CODE = "7KXMP";
 const GAME_CLOCK = 20_000;
@@ -47,7 +48,11 @@ function prepareRoom(playerCount: number): PreparedRoom {
     { length: playerCount },
     (_, index) => `socket-${index + 1}`,
   );
-  const host = roomManager.createRoom(socketIds[0] as string, "J1");
+  const host = roomManager.createRoom(
+    socketIds[0] as string,
+    "J1",
+    TEST_CLIENT_INSTANCE_ID,
+  );
   const playerIds = [host.session.playerId];
 
   for (let index = 1; index < socketIds.length; index += 1) {
@@ -55,6 +60,7 @@ function prepareRoom(playerCount: number): PreparedRoom {
       socketIds[index] as string,
       `J${index + 1}`,
       host.session.roomCode,
+      TEST_CLIENT_INSTANCE_ID,
     );
     playerIds.push(joined.session.playerId);
   }
@@ -427,6 +433,7 @@ describe("GameManager", () => {
           "socket-4",
           "J4",
           preparedRoom.roomCode,
+          TEST_CLIENT_INSTANCE_ID,
         ),
       "GAME_ALREADY_STARTED",
     );
