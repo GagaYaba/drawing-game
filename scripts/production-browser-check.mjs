@@ -33,6 +33,12 @@ const VIEWPORTS = [
   { width: 375, height: 667 },
   { width: 390, height: 844 },
 ];
+const PROMPT_HEADER_VIEWPORTS = [
+  { width: 1366, height: 768 },
+  { width: 1440, height: 900 },
+  { width: 390, height: 844 },
+  { width: 320, height: 568 },
+];
 const DESKTOP_VIEWPORT = VIEWPORTS[1];
 const DIALOG_SELECTOR = ".game-dialog-card[role='dialog']";
 const UUID_V4_PATTERN =
@@ -128,6 +134,39 @@ function assertCondition(condition, message) {
   if (!condition) {
     throw new Error(message);
   }
+}
+
+async function loadPromptHeaderCases() {
+  const { DRAWING_PROMPTS } = await import(
+    new URL("../server/dist/game/prompt-bank.js", import.meta.url)
+  );
+  assertCondition(
+    Array.isArray(DRAWING_PROMPTS) && DRAWING_PROMPTS.length === 52,
+    "The built prompt bank must expose exactly 52 prompts.",
+  );
+
+  const rankByLength = (selector, count) =>
+    [...DRAWING_PROMPTS]
+      .sort(
+        (left, right) =>
+          [...selector(right)].length - [...selector(left)].length,
+      )
+      .slice(0, count);
+  const selectedById = new Map();
+  for (const prompt of [
+    ...rankByLength(({ statement }) => statement, 5),
+    ...rankByLength(({ lowLabel }) => lowLabel, 1),
+    ...rankByLength(({ highLabel }) => highLabel, 1),
+  ]) {
+    selectedById.set(prompt.id, {
+      id: prompt.id,
+      statement: prompt.statement,
+      lowLabel: prompt.lowLabel,
+      highLabel: prompt.highLabel,
+    });
+  }
+
+  return [...selectedById.values()];
 }
 
 function delay(milliseconds) {
@@ -1480,6 +1519,191 @@ class BrowserPage {
     };
   }
 
+  async inspectPromptHeaderLayout(viewport, prompt) {
+    await this.setViewport(viewport);
+    await this.waitForSelector(
+      ".game-prompt-header",
+      "game prompt header",
+    );
+    const result = await this.evaluate(`(async () => {
+      window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+      const prompt = ${JSON.stringify(prompt)};
+      const header = document.querySelector(".game-prompt-header");
+      const statement = header?.querySelector(".game-prompt-text");
+      const gauge = header?.querySelector(".scale-gauge");
+      const track = header?.querySelector(".scale-gauge__track");
+      const labels = [
+        ...(header?.querySelectorAll(".scale-gauge__labels span") ?? []),
+      ];
+      const canvasStage = document.querySelector(
+        ".drawing-editor__canvas-stage",
+      );
+      const canvas = document.querySelector(".drawing-canvas");
+      if (
+        !(header instanceof HTMLElement) ||
+        !(statement instanceof HTMLElement) ||
+        !(gauge instanceof HTMLElement) ||
+        !(track instanceof HTMLElement) ||
+        labels.length !== 2 ||
+        !labels.every((label) => label instanceof HTMLElement) ||
+        !(canvasStage instanceof HTMLElement) ||
+        !(canvas instanceof HTMLCanvasElement)
+      ) {
+        return { present: false };
+      }
+
+      const original = {
+        statement: statement.textContent ?? "",
+        lowLabel: labels[0].textContent ?? "",
+        highLabel: labels[1].textContent ?? "",
+      };
+      const waitForLayout = () =>
+        new Promise((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(resolve)),
+        );
+      const rectangle = (element) => {
+        const value = element.getBoundingClientRect();
+        return {
+          top: value.top,
+          right: value.right,
+          bottom: value.bottom,
+          left: value.left,
+          width: value.width,
+          height: value.height,
+        };
+      };
+      const containedBy = (inner, outer, epsilon = 1) =>
+        inner.top >= outer.top - epsilon &&
+        inner.right <= outer.right + epsilon &&
+        inner.bottom <= outer.bottom + epsilon &&
+        inner.left >= outer.left - epsilon;
+
+      try {
+        statement.textContent =
+          "Une consigne courte sert de référence. Créez-la, du minuscule au gigantesque.";
+        labels[0].textContent = "Minuscule";
+        labels[1].textContent = "Gigantesque";
+        await waitForLayout();
+        const beforeCanvas = canvas.getBoundingClientRect();
+
+        statement.textContent = prompt.statement;
+        labels[0].textContent = prompt.lowLabel;
+        labels[1].textContent = prompt.highLabel;
+        await waitForLayout();
+
+        const headerRect = rectangle(header);
+        const statementRect = rectangle(statement);
+        const gaugeRect = rectangle(gauge);
+        const trackRect = rectangle(track);
+        const labelRects = labels.map(rectangle);
+        const canvasStageRect = rectangle(canvasStage);
+        const afterCanvas = rectangle(canvas);
+        const labelStyles = labels.map((label) =>
+          getComputedStyle(label),
+        );
+        const epsilon = 1;
+
+        return {
+          present: true,
+          noHorizontalOverflow:
+            document.documentElement.scrollWidth <=
+              window.innerWidth + epsilon &&
+            document.body.scrollWidth <= window.innerWidth + epsilon,
+          headerContained:
+            headerRect.left >= -epsilon &&
+            headerRect.right <= window.innerWidth + epsilon &&
+            headerRect.top >= -epsilon &&
+            headerRect.bottom <= window.innerHeight + epsilon,
+          statementVisible:
+            statementRect.width > 0 &&
+            statementRect.height > 0 &&
+            containedBy(statementRect, headerRect) &&
+            statement.scrollWidth <= statement.clientWidth + epsilon &&
+            statement.scrollHeight <= statement.clientHeight + epsilon,
+          gaugeVisible:
+            gaugeRect.width > 0 &&
+            gaugeRect.height > 0 &&
+            trackRect.width > 0 &&
+            trackRect.height > 0 &&
+            containedBy(gaugeRect, headerRect) &&
+            gaugeRect.bottom <= window.innerHeight + epsilon,
+          labelsReadable: labels.every(
+            (label, index) =>
+              labelRects[index].width > 0 &&
+              labelRects[index].height > 0 &&
+              containedBy(labelRects[index], headerRect) &&
+              label.scrollWidth <= label.clientWidth + epsilon &&
+              label.scrollHeight <= label.clientHeight + epsilon &&
+              labelStyles[index].display !== "none" &&
+              labelStyles[index].visibility !== "hidden" &&
+              Number.parseFloat(labelStyles[index].fontSize) >= 10,
+          ),
+          canvasPreserved:
+            beforeCanvas.width > 0 &&
+            beforeCanvas.height > 0 &&
+            afterCanvas.width >= beforeCanvas.width * 0.8 &&
+            afterCanvas.height >= beforeCanvas.height * 0.8 &&
+            containedBy(afterCanvas, canvasStageRect) &&
+            (window.innerWidth < 900 ||
+              (afterCanvas.top >= -epsilon &&
+                afterCanvas.bottom <= window.innerHeight + epsilon)),
+          headerHeight: headerRect.height,
+          statementHeight: statementRect.height,
+          gaugeHeight: gaugeRect.height,
+          canvas: {
+            beforeWidth: beforeCanvas.width,
+            beforeHeight: beforeCanvas.height,
+            afterWidth: afterCanvas.width,
+            afterHeight: afterCanvas.height,
+          },
+        };
+      } finally {
+        statement.textContent = original.statement;
+        labels[0].textContent = original.lowLabel;
+        labels[1].textContent = original.highLabel;
+        await waitForLayout();
+      }
+    })()`);
+
+    assertCondition(
+      result?.present === true,
+      `The prompt header is incomplete for "${prompt.id}" at ${viewport.width}x${viewport.height}.`,
+    );
+    assertCondition(
+      result.noHorizontalOverflow,
+      `Prompt "${prompt.id}" causes horizontal overflow at ${viewport.width}x${viewport.height}.`,
+    );
+    assertCondition(
+      result.headerContained && result.statementVisible,
+      `Prompt "${prompt.id}" is clipped at ${viewport.width}x${viewport.height}.`,
+    );
+    assertCondition(
+      result.gaugeVisible && result.labelsReadable,
+      `Prompt "${prompt.id}" hides its gauge or labels at ${viewport.width}x${viewport.height}.`,
+    );
+    assertCondition(
+      result.canvasPreserved,
+      `Prompt "${prompt.id}" reduces the drawing canvas excessively at ${viewport.width}x${viewport.height}.`,
+    );
+
+    return {
+      id: prompt.id,
+      viewport: `${viewport.width}x${viewport.height}`,
+      statementLength: [...prompt.statement].length,
+      lowLabelLength: [...prompt.lowLabel].length,
+      highLabelLength: [...prompt.highLabel].length,
+      headerHeight: Math.round(result.headerHeight),
+      statementHeight: Math.round(result.statementHeight),
+      gaugeHeight: Math.round(result.gaugeHeight),
+      canvasWidth: Math.round(result.canvas.afterWidth),
+      canvasHeight: Math.round(result.canvas.afterHeight),
+      noHorizontalOverflow: true,
+      textAndGaugeVisible: true,
+      labelsReadable: true,
+      canvasPreserved: true,
+    };
+  }
+
   async inspectDialog({
     title,
     confirmLabel,
@@ -2466,6 +2690,7 @@ async function runUiScenario({
   hostPage,
   pagesByPlayerId,
   screenshotDirectory,
+  promptHeaderCases,
 }) {
   const pages = [...pagesByPlayerId.values()];
   assertCondition(
@@ -2493,6 +2718,7 @@ async function runUiScenario({
 
   const screenshotPaths = [];
   const drawingVisualChecks = [];
+  const promptHeaderVisualChecks = [];
   const completedTurnIds = new Set();
   let detailedDrawingCheck = null;
   let guessDialogCheck = null;
@@ -2529,6 +2755,17 @@ async function runUiScenario({
     );
 
     if (turnNumber === 1) {
+      for (const prompt of promptHeaderCases) {
+        for (const viewport of PROMPT_HEADER_VIEWPORTS) {
+          promptHeaderVisualChecks.push(
+            await drawerPage.inspectPromptHeaderLayout(
+              viewport,
+              prompt,
+            ),
+          );
+        }
+      }
+
       for (const viewport of VIEWPORTS) {
         const waiting = await observerPage.inspectWaitingLayout(
           viewport,
@@ -2695,6 +2932,7 @@ async function runUiScenario({
     totalTurnsCompleted: completedTurnIds.size,
     nativeConfirmCalls,
     drawingVisualChecks,
+    promptHeaderVisualChecks,
     detailedDrawingCheck,
     guessDialogCheck,
     guessCancellationTested,
@@ -2705,7 +2943,11 @@ async function runUiScenario({
   };
 }
 
-async function runBrowserScenario(controller, baseUrl) {
+async function runBrowserScenario(
+  controller,
+  baseUrl,
+  promptHeaderCases,
+) {
   controller.baseUrl = baseUrl;
   const hostContext = await controller.createContext();
   const guestOneContext = await controller.createContext();
@@ -2937,6 +3179,7 @@ async function runBrowserScenario(controller, baseUrl) {
     hostPage: secondTab,
     pagesByPlayerId,
     screenshotDirectory,
+    promptHeaderCases,
   });
 
   return {
@@ -2961,6 +3204,7 @@ async function main() {
     return;
   }
 
+  const promptHeaderCases = await loadPromptHeaderCases();
   await verifyHealth(options.baseUrl, options.timeoutMs);
   const chrome = await launchChrome(options);
   const controller = new BrowserController(
@@ -2972,6 +3216,7 @@ async function main() {
     const result = await runBrowserScenario(
       controller,
       options.baseUrl,
+      promptHeaderCases,
     );
     await verifyHealth(options.baseUrl, options.timeoutMs);
     console.info(

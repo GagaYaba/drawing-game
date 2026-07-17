@@ -178,9 +178,9 @@ interface DrawingPrompt {
 }
 ```
 
-La banque contient 36 consignes dotées d'identifiants uniques. Le serveur mémorise les identifiants déjà utilisés et choisit chaque nouveau tour parmi les consignes restantes : une consigne ne peut donc pas être rejouée au cours de la même partie.
+La banque contient 52 consignes dotées d'identifiants uniques : les 36 sujets historiques ont été reformulés et 16 nouvelles situations ont été ajoutées. Le serveur mémorise les identifiants déjà utilisés et choisit chaque nouveau tour parmi les consignes restantes : une consigne ne peut donc pas être rejouée au cours de la même partie.
 
-La phrase complète indique toujours le sujet à représenter, puis l’extrême correspondant au niveau **10** avant celui du niveau **1**. Par exemple : `Représente une fée de la plus puissante (10) à la moins puissante (1).` Les formulations vagues telles que « plus ou moins » ne sont plus admises. Les libellés `lowLabel` et `highLabel` sont transmis séparément dans l’état public afin que le frontend n’ait jamais à analyser la phrase.
+Chaque phrase associe une courte mise en situation, une mission dessinable et une échelle allant de l’extrême **1** à l’extrême **10**. Par exemple : `Une fée passe l’examen final de magie devant un jury sévère. Imaginez son sort, de l’étincelle qui s’éteint à la tempête magique qui remplit la salle.` Les formulations vagues telles que « plus ou moins » ne sont pas admises. Les libellés `lowLabel` et `highLabel` sont transmis séparément dans l’état public afin que le frontend n’ait jamais à analyser la phrase.
 
 Dans `ROUND_INTRO`, `DRAWING`, `VOTING` et `REVEAL`, la jauge horizontale s'étend sur toute la largeur disponible directement sous la consigne. Elle comprend dix segments colorés, des graduations de 1 à 10 et les deux libellés d’extrémité. Le composant React `ScaleGauge` reste un composant de présentation réutilisable, responsive et accessible. Il affiche le niveau privé du dessinateur pendant les phases autorisées, la propre estimation verrouillée d'un votant ou le secret public pendant `REVEAL`.
 
