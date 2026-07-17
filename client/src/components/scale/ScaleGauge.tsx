@@ -16,6 +16,7 @@ export interface ScaleGaugeProps {
   valueTextLabel?: string;
   size?: "full" | "compact";
   ariaLabel?: string;
+  reserveMarkerSpace?: boolean;
 }
 
 export function ScaleGauge({
@@ -26,6 +27,7 @@ export function ScaleGauge({
   valueTextLabel = "Niveau secret",
   size = "full",
   ariaLabel,
+  reserveMarkerSpace = false,
 }: ScaleGaugeProps) {
   const validValue = isScaleGaugeValue(value) ? value : null;
   const markerPosition = getScaleGaugeMarkerPosition(validValue);
@@ -69,7 +71,7 @@ export function ScaleGauge({
 
           <div
             className={
-              markerPosition === null
+              markerPosition === null && !reserveMarkerSpace
                 ? "scale-gauge__track-wrap"
                 : "scale-gauge__track-wrap scale-gauge__track-wrap--with-marker"
             }

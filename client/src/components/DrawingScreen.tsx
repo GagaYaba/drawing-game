@@ -17,6 +17,8 @@ import { Mascot } from "./Mascot";
 import { DisconnectedPlayersNotice } from "./PlayerConnectionStatus";
 import { ScaleGauge } from "./scale/ScaleGauge";
 
+import "./DrawingScreen.css";
+
 interface DrawingScreenProps {
   roomCode?: string;
   game: PublicGameState;
@@ -57,6 +59,7 @@ export function DrawingScreen({
           value={isDrawer ? secretLevel : null}
           valueTextLabel="Niveau à représenter"
           size="full"
+          reserveMarkerSpace={!isDrawer}
         />
       }
       valueText={
@@ -65,6 +68,17 @@ export function DrawingScreen({
             label="Niveau à représenter"
             value={secretLevel}
           />
+        ) : !isDrawer ? (
+          <p
+            className="scale-gauge__value-text game-prompt-value"
+          >
+            <span className="visually-hidden">
+              Niveau à représenter : secret
+            </span>
+            <span aria-hidden="true">Niveau à représenter :</span>
+            <strong aria-hidden="true">?</strong>
+            <span aria-hidden="true">/ 10</span>
+          </p>
         ) : undefined
       }
     />
@@ -132,11 +146,28 @@ export function DrawingScreen({
         />
       ) : (
         <>
-          <div className="game-phase-layout__main drawing-observer-stage">
-            <span className="drawing-observer-stage__icon" aria-hidden="true">
-              ✎
-            </span>
-            <p>Le dessin apparaîtra ici après sa validation.</p>
+          <div
+            className="game-phase-layout__main game-media-viewport drawing-observer-viewport"
+          >
+            <div
+              className="drawing-observer-stage"
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+            >
+              <div className="drawing-observer-stage__content">
+                <Mascot
+                  character={drawingMascotCharacter}
+                  expression="fly"
+                  size="lg"
+                  decorative
+                  className="drawing-observer-stage__mascot"
+                />
+                <p className="drawing-observer-stage__message">
+                  Le dessin apparaîtra ici après sa validation.
+                </p>
+              </div>
+            </div>
           </div>
 
           <aside className="game-phase-layout__sidebar">

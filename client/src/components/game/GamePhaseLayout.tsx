@@ -20,6 +20,7 @@ export function GamePhaseLayout({
       className={`game-card game-phase game-phase-layout${className === undefined ? "" : ` ${className}`}`}
       aria-label={ariaLabel}
       aria-busy={isBusy}
+      tabIndex={-1}
     >
       {prompt}
       <div className="game-phase-layout__body">{children}</div>

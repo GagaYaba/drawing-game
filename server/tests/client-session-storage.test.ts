@@ -4,6 +4,8 @@ import {
   DRAWING_BACKGROUND_COLOR,
   DRAWING_COLOR_PALETTE,
   DRAWING_DOCUMENT_VERSION,
+  DRAWING_LEGACY_DOCUMENT_VERSION,
+  DRAWING_MAX_FILL_OPERATIONS,
   type PlayerSessionCredentials,
 } from "@drawing-game/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -287,6 +289,78 @@ describe("stored drawing draft", () => {
         playerId: DRAWING_DRAFT.playerId,
       }),
     ).toBe(false);
+  });
+
+  it("conserve un remplissage et l'outil sélectionné", () => {
+    const storage = new MemoryBrowserStorage();
+    const fillDraft: StoredDrawingDraft = {
+      ...DRAWING_DRAFT,
+      drawing: {
+        ...DRAWING_DRAFT.drawing,
+        strokes: [
+          {
+            tool: "fill",
+            color: "#FDD835",
+            width: DRAWING_ALLOWED_STROKE_WIDTHS[1],
+            points: [{ x: 0.45, y: 0.55 }],
+          },
+        ],
+      },
+      selectedTool: "fill",
+      selectedColor: "#FDD835",
+    };
+
+    expect(writeStoredDrawingDraft(fillDraft, storage)).toBe(true);
+    expect(readStoredDrawingDraft(storage)).toEqual(fillDraft);
+  });
+
+  it("migre un brouillon v1 historique vers le document v2", () => {
+    const storage = new MemoryBrowserStorage();
+    const legacyDraft = {
+      ...structuredClone(DRAWING_DRAFT),
+      drawing: {
+        ...structuredClone(DRAWING_DRAFT.drawing),
+        version: DRAWING_LEGACY_DOCUMENT_VERSION,
+      },
+    };
+    storage.setItem(
+      STORED_DRAWING_DRAFT_KEY,
+      JSON.stringify(legacyDraft),
+    );
+
+    const restored = readStoredDrawingDraft(storage);
+
+    expect(restored?.drawing.version).toBe(DRAWING_DOCUMENT_VERSION);
+    expect(restored?.drawing.strokes).toEqual(
+      DRAWING_DRAFT.drawing.strokes,
+    );
+  });
+
+  it("supprime un brouillon qui dépasse la limite de remplissages", () => {
+    const storage = new MemoryBrowserStorage();
+    const oversizedDraft = {
+      ...structuredClone(DRAWING_DRAFT),
+      drawing: {
+        ...structuredClone(DRAWING_DRAFT.drawing),
+        strokes: Array.from(
+          { length: DRAWING_MAX_FILL_OPERATIONS + 1 },
+          () => ({
+            tool: "fill",
+            color: "#E53935",
+            width: DRAWING_ALLOWED_STROKE_WIDTHS[1],
+            points: [{ x: 0.5, y: 0.5 }],
+          }),
+        ),
+      },
+      selectedTool: "fill",
+    };
+    storage.setItem(
+      STORED_DRAWING_DRAFT_KEY,
+      JSON.stringify(oversizedDraft),
+    );
+
+    expect(readStoredDrawingDraft(storage)).toBeNull();
+    expect(storage.getItem(STORED_DRAWING_DRAFT_KEY)).toBeNull();
   });
 
   it("supprime un brouillon de dessin corrompu", () => {

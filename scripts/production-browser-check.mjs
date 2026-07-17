@@ -2,7 +2,7 @@
 
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import {
@@ -33,6 +33,8 @@ const VIEWPORTS = [
   { width: 375, height: 667 },
   { width: 390, height: 844 },
 ];
+const DESKTOP_VIEWPORT = VIEWPORTS[1];
+const DIALOG_SELECTOR = ".game-dialog-card[role='dialog']";
 const UUID_V4_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
@@ -939,6 +941,305 @@ class BrowserPage {
     );
   }
 
+  accessibleButtonExpression(label, scopeSelector = null) {
+    const serializedScope = JSON.stringify(scopeSelector);
+    return `(() => {
+      const normalize = (value) => value.replace(/\\s+/gu, " ").trim();
+      const scopeSelector = ${serializedScope};
+      const scope =
+        scopeSelector === null
+          ? document
+          : document.querySelector(scopeSelector);
+      if (scope === null) {
+        return null;
+      }
+      const button = [...scope.querySelectorAll("button")].find(
+        (candidate) => {
+          const accessibleName =
+            candidate.getAttribute("aria-label") ??
+            candidate.textContent ??
+            "";
+          return (
+            normalize(accessibleName) === ${JSON.stringify(label)} &&
+            !candidate.disabled
+          );
+        },
+      );
+      if (!(button instanceof HTMLButtonElement)) {
+        return null;
+      }
+      button.scrollIntoView({
+        block: "center",
+        inline: "center",
+        behavior: "instant",
+      });
+      const rect = button.getBoundingClientRect();
+      return {
+        disabled: button.disabled,
+        left: rect.left,
+        top: rect.top,
+        width: rect.width,
+        height: rect.height,
+      };
+    })()`;
+  }
+
+  async waitForAccessibleButton(label, scopeSelector = null) {
+    return waitUntil(
+      () =>
+        this.evaluate(
+          this.accessibleButtonExpression(label, scopeSelector),
+        ),
+      `enabled accessible "${label}" button in ${this.label}`,
+      this.timeoutMs,
+      () => this.diagnostics(),
+    );
+  }
+
+  async dispatchMouseClickAt(x, y) {
+    await this.connection.send(
+      "Input.dispatchMouseEvent",
+      {
+        type: "mouseMoved",
+        x,
+        y,
+      },
+      this.sessionId,
+    );
+    await this.connection.send(
+      "Input.dispatchMouseEvent",
+      {
+        type: "mousePressed",
+        x,
+        y,
+        button: "left",
+        buttons: 1,
+        clickCount: 1,
+      },
+      this.sessionId,
+    );
+    await this.connection.send(
+      "Input.dispatchMouseEvent",
+      {
+        type: "mouseReleased",
+        x,
+        y,
+        button: "left",
+        buttons: 0,
+        clickCount: 1,
+      },
+      this.sessionId,
+    );
+  }
+
+  async clickAccessibleButton(label, scopeSelector = null) {
+    const rect = await this.waitForAccessibleButton(
+      label,
+      scopeSelector,
+    );
+    assertCondition(
+      rect.width > 0 && rect.height > 0,
+      `${this.label}'s "${label}" button has no clickable area.`,
+    );
+    await this.dispatchMouseClickAt(
+      rect.left + rect.width / 2,
+      rect.top + rect.height / 2,
+    );
+    await this.evaluate(
+      "new Promise((resolve) => requestAnimationFrame(resolve))",
+    );
+  }
+
+  async getVisibleElementRect(selector) {
+    return waitUntil(
+      () =>
+        this.evaluate(`(() => {
+          const element = document.querySelector(${JSON.stringify(selector)});
+          if (!(element instanceof HTMLElement)) {
+            return null;
+          }
+          element.scrollIntoView({
+            block: "center",
+            inline: "center",
+            behavior: "instant",
+          });
+          const rect = element.getBoundingClientRect();
+          if (rect.width <= 0 || rect.height <= 0) {
+            return null;
+          }
+          return {
+            left: rect.left,
+            top: rect.top,
+            width: rect.width,
+            height: rect.height,
+          };
+        })()`),
+      `visible ${selector} in ${this.label}`,
+      this.timeoutMs,
+      () => this.diagnostics(),
+    );
+  }
+
+  async clickElementAt(
+    selector,
+    normalizedX = 0.5,
+    normalizedY = 0.5,
+  ) {
+    const rect = await this.getVisibleElementRect(selector);
+    const x = rect.left + rect.width * normalizedX;
+    const y = rect.top + rect.height * normalizedY;
+    await this.dispatchMouseClickAt(x, y);
+    await this.evaluate(
+      "new Promise((resolve) => requestAnimationFrame(resolve))",
+    );
+  }
+
+  async drawNormalizedPath(selector, normalizedPoints) {
+    assertCondition(
+      Array.isArray(normalizedPoints) && normalizedPoints.length >= 2,
+      "A real drawing path needs at least two points.",
+    );
+    const rect = await this.getVisibleElementRect(selector);
+    const toViewportPoint = ([normalizedX, normalizedY]) => ({
+      x: rect.left + rect.width * normalizedX,
+      y: rect.top + rect.height * normalizedY,
+    });
+    const points = normalizedPoints.map(toViewportPoint);
+    const firstPoint = points[0];
+
+    await this.connection.send(
+      "Input.dispatchMouseEvent",
+      {
+        type: "mouseMoved",
+        ...firstPoint,
+      },
+      this.sessionId,
+    );
+    await this.connection.send(
+      "Input.dispatchMouseEvent",
+      {
+        type: "mousePressed",
+        ...firstPoint,
+        button: "left",
+        buttons: 1,
+        clickCount: 1,
+      },
+      this.sessionId,
+    );
+    for (const point of points.slice(1)) {
+      await this.connection.send(
+        "Input.dispatchMouseEvent",
+        {
+          type: "mouseMoved",
+          ...point,
+          button: "none",
+          buttons: 1,
+        },
+        this.sessionId,
+      );
+    }
+    const lastPoint = points.at(-1);
+    await this.connection.send(
+      "Input.dispatchMouseEvent",
+      {
+        type: "mouseReleased",
+        ...lastPoint,
+        button: "left",
+        buttons: 0,
+        clickCount: 1,
+      },
+      this.sessionId,
+    );
+    await this.evaluate(
+      "new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))",
+    );
+  }
+
+  async pressKey(key) {
+    const keyMetadata =
+      key === "Escape"
+        ? {
+            code: "Escape",
+            key: "Escape",
+            windowsVirtualKeyCode: 27,
+            nativeVirtualKeyCode: 27,
+          }
+        : { code: key, key };
+    await this.connection.send(
+      "Input.dispatchKeyEvent",
+      {
+        type: "rawKeyDown",
+        ...keyMetadata,
+      },
+      this.sessionId,
+    );
+    await this.connection.send(
+      "Input.dispatchKeyEvent",
+      {
+        type: "keyUp",
+        ...keyMetadata,
+      },
+      this.sessionId,
+    );
+  }
+
+  async sampleCanvas(normalizedX, normalizedY) {
+    return this.evaluate(`(() => {
+      const canvas = document.querySelector(".drawing-canvas");
+      if (!(canvas instanceof HTMLCanvasElement)) {
+        return null;
+      }
+      const context = canvas.getContext("2d");
+      if (context === null || canvas.width < 1 || canvas.height < 1) {
+        return null;
+      }
+      const x = Math.min(
+        canvas.width - 1,
+        Math.max(0, Math.floor(canvas.width * ${normalizedX})),
+      );
+      const y = Math.min(
+        canvas.height - 1,
+        Math.max(0, Math.floor(canvas.height * ${normalizedY})),
+      );
+      return [...context.getImageData(x, y, 1, 1).data];
+    })()`);
+  }
+
+  async captureScreenshot(filePath) {
+    const screenshot = await this.connection.send(
+      "Page.captureScreenshot",
+      {
+        format: "png",
+        fromSurface: true,
+        captureBeyondViewport: false,
+      },
+      this.sessionId,
+    );
+    assertCondition(
+      typeof screenshot.data === "string" &&
+        screenshot.data.length > 0,
+      `${this.label} did not return screenshot data.`,
+    );
+    await writeFile(filePath, Buffer.from(screenshot.data, "base64"));
+    return filePath;
+  }
+
+  async installNativeConfirmGuard() {
+    await this.evaluate(`(() => {
+      window.__drawingGameNativeConfirmCalls = 0;
+      window.confirm = () => {
+        window.__drawingGameNativeConfirmCalls += 1;
+        return false;
+      };
+    })()`);
+  }
+
+  async getNativeConfirmCallCount() {
+    return this.evaluate(
+      "Number(window.__drawingGameNativeConfirmCalls ?? 0)",
+    );
+  }
+
   async getStorageSnapshot() {
     return this.evaluate(`(() => {
       const serializedSession = localStorage.getItem(
@@ -970,6 +1271,457 @@ class BrowserPage {
       this.timeoutMs,
       () => this.diagnostics(),
     );
+  }
+
+  async inspectWaitingLayout(viewport) {
+    await this.setViewport(viewport);
+    await this.waitForSelector(
+      ".drawing-observer-stage",
+      "drawing waiting stage",
+    );
+    const result = await this.evaluate(`(() => {
+      window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+      const stage = document.querySelector(".drawing-observer-stage");
+      const content = stage?.querySelector(
+        ".drawing-observer-stage__content",
+      );
+      const mascot = stage?.querySelector(
+        ".drawing-observer-stage__mascot",
+      );
+      const message = stage?.querySelector(
+        ".drawing-observer-stage__message",
+      );
+      if (
+        !(stage instanceof HTMLElement) ||
+        !(content instanceof HTMLElement) ||
+        !(mascot instanceof HTMLImageElement) ||
+        !(message instanceof HTMLElement)
+      ) {
+        return { present: false };
+      }
+      const stageRect = stage.getBoundingClientRect();
+      const contentRect = content.getBoundingClientRect();
+      const mascotRect = mascot.getBoundingClientRect();
+      const stageStyle = getComputedStyle(stage);
+      const epsilon = 1;
+      return {
+        present: true,
+        noHorizontalOverflow:
+          document.documentElement.scrollWidth <= window.innerWidth + epsilon &&
+          document.body.scrollWidth <= window.innerWidth + epsilon,
+        stage: {
+          left: stageRect.left,
+          right: stageRect.right,
+          width: stageRect.width,
+          height: stageRect.height,
+          backgroundColor: stageStyle.backgroundColor,
+        },
+        contentCentered:
+          Math.abs(
+            contentRect.left +
+              contentRect.width / 2 -
+              (stageRect.left + stageRect.width / 2),
+          ) <= 2 &&
+          Math.abs(
+            contentRect.top +
+              contentRect.height / 2 -
+              (stageRect.top + stageRect.height / 2),
+          ) <= 2,
+        mascotContained:
+          mascotRect.left >= stageRect.left - epsilon &&
+          mascotRect.right <= stageRect.right + epsilon &&
+          mascotRect.top >= stageRect.top - epsilon &&
+          mascotRect.bottom <= stageRect.bottom + epsilon,
+        flyAsset: /\\/fly\\.png(?:[?#].*)?$/u.test(mascot.currentSrc || mascot.src),
+        message: message.textContent?.replace(/\\s+/gu, " ").trim() ?? "",
+      };
+    })()`);
+
+    assertCondition(
+      result?.present === true,
+      `The drawing waiting scene is missing at ${viewport.width}x${viewport.height}.`,
+    );
+    assertCondition(
+      result.noHorizontalOverflow,
+      `The drawing waiting scene causes horizontal overflow at ${viewport.width}x${viewport.height}.`,
+    );
+    assertCondition(
+      result.stage.left >= -1 &&
+        result.stage.right <= viewport.width + 1 &&
+        result.stage.width > 0 &&
+        result.stage.height > 0,
+      `The drawing waiting stage escapes the viewport at ${viewport.width}x${viewport.height}.`,
+    );
+    assertCondition(
+      result.stage.backgroundColor === "rgb(255, 255, 255)" ||
+        result.stage.backgroundColor === "rgba(255, 255, 255, 1)",
+      `The drawing waiting stage is not white at ${viewport.width}x${viewport.height}.`,
+    );
+    assertCondition(
+      result.contentCentered && result.mascotContained,
+      `The waiting fly composition is not centered and contained at ${viewport.width}x${viewport.height}.`,
+    );
+    assertCondition(
+      result.flyAsset && result.message.length > 0,
+      `The waiting scene is missing its fly mascot or message at ${viewport.width}x${viewport.height}.`,
+    );
+
+    return {
+      viewport: `${viewport.width}x${viewport.height}`,
+      width: Math.round(result.stage.width),
+      height: Math.round(result.stage.height),
+      flyAsset: result.flyAsset,
+      whiteStage: true,
+      noHorizontalOverflow: true,
+    };
+  }
+
+  async inspectDrawingLayout(viewport) {
+    await this.setViewport(viewport);
+    await this.waitForSelector(".drawing-canvas", "drawing editor canvas");
+    const result = await this.evaluate(`(() => {
+      window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+      const stage = document.querySelector(
+        ".drawing-editor__canvas-stage",
+      );
+      const canvas = document.querySelector(".drawing-canvas");
+      const toolbar = document.querySelector(".drawing-toolbar");
+      if (
+        !(stage instanceof HTMLElement) ||
+        !(canvas instanceof HTMLCanvasElement) ||
+        !(toolbar instanceof HTMLElement)
+      ) {
+        return { present: false };
+      }
+      const stageRect = stage.getBoundingClientRect();
+      const canvasRect = canvas.getBoundingClientRect();
+      const iconButtons = [
+        "Stylo",
+        "Gomme",
+        "Pot de peinture",
+        "Annuler",
+        "Tout effacer",
+      ].map((label) => {
+        const button = toolbar.querySelector(
+          "button[aria-label='" + label + "']",
+        );
+        return {
+          label,
+          present: button instanceof HTMLButtonElement,
+          hasSvg:
+            button instanceof HTMLButtonElement &&
+            button.querySelector("svg") instanceof SVGElement,
+        };
+      });
+      const palette = [
+        ...toolbar.querySelectorAll("button[aria-label^='Couleur ']"),
+      ];
+      const epsilon = 1;
+      return {
+        present: true,
+        noHorizontalOverflow:
+          document.documentElement.scrollWidth <= window.innerWidth + epsilon &&
+          document.body.scrollWidth <= window.innerWidth + epsilon,
+        stage: {
+          left: stageRect.left,
+          right: stageRect.right,
+          width: stageRect.width,
+          height: stageRect.height,
+        },
+        canvas: {
+          width: canvasRect.width,
+          height: canvasRect.height,
+        },
+        paletteCount: palette.length,
+        iconButtons,
+      };
+    })()`);
+
+    assertCondition(
+      result?.present === true,
+      `The drawing editor is missing at ${viewport.width}x${viewport.height}.`,
+    );
+    assertCondition(
+      result.noHorizontalOverflow,
+      `The drawing editor causes horizontal overflow at ${viewport.width}x${viewport.height}.`,
+    );
+    assertCondition(
+      result.stage.left >= -1 &&
+        result.stage.right <= viewport.width + 1 &&
+        result.stage.width > 0 &&
+        result.stage.height > 0,
+      `The drawing editor stage escapes the viewport at ${viewport.width}x${viewport.height}.`,
+    );
+    assertCondition(
+      result.canvas.width > 0 &&
+        result.canvas.height > 0 &&
+        Math.abs(result.canvas.width / result.canvas.height - 4 / 3) <
+          0.03,
+      `The drawing canvas lost its 4:3 ratio at ${viewport.width}x${viewport.height}.`,
+    );
+    assertCondition(
+      result.paletteCount >= 16,
+      `The drawing palette is not Paint-like at ${viewport.width}x${viewport.height}.`,
+    );
+    assertCondition(
+      result.iconButtons.every(
+        (button) => button.present && button.hasSvg,
+      ),
+      `One or more drawing actions lack their icon at ${viewport.width}x${viewport.height}.`,
+    );
+
+    return {
+      viewport: `${viewport.width}x${viewport.height}`,
+      width: Math.round(result.canvas.width),
+      height: Math.round(result.canvas.height),
+      paletteCount: result.paletteCount,
+      iconButtons: result.iconButtons.map((button) => button.label),
+      noHorizontalOverflow: true,
+    };
+  }
+
+  async inspectDialog({
+    title,
+    confirmLabel,
+    cancelLabel,
+    valueLabel = null,
+  }) {
+    await this.waitForSelector(DIALOG_SELECTOR, `${title} dialog`);
+    await this.evaluate(
+      "new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))",
+    );
+    const result = await this.evaluate(`(() => {
+      const normalize = (value) => value.replace(/\\s+/gu, " ").trim();
+      const dialog = document.querySelector(${JSON.stringify(DIALOG_SELECTOR)});
+      if (!(dialog instanceof HTMLElement)) {
+        return { present: false };
+      }
+      const titleId = dialog.getAttribute("aria-labelledby");
+      const descriptionIds = (
+        dialog.getAttribute("aria-describedby") ?? ""
+      )
+        .split(/\\s+/u)
+        .filter(Boolean);
+      const titleElement =
+        titleId === null ? null : document.getElementById(titleId);
+      const descriptionElements = descriptionIds
+        .map((id) => document.getElementById(id))
+        .filter((element) => element !== null);
+      const buttons = [...dialog.querySelectorAll("button")].map(
+        (button) =>
+          normalize(
+            button.getAttribute("aria-label") ??
+              button.textContent ??
+              "",
+          ),
+      );
+      const value = dialog.querySelector(".game-dialog__value");
+      const labelledValue = value?.querySelector("[aria-label]");
+      const rect = dialog.getBoundingClientRect();
+      const epsilon = 1;
+      return {
+        present: true,
+        role: dialog.getAttribute("role"),
+        ariaModal: dialog.getAttribute("aria-modal"),
+        title: normalize(titleElement?.textContent ?? ""),
+        description: normalize(
+          descriptionElements
+            .map((element) => element.textContent ?? "")
+            .join(" "),
+        ),
+        buttons,
+        valueText: normalize(value?.textContent ?? ""),
+        valueLabel: labelledValue?.getAttribute("aria-label") ?? null,
+        valueDescribed:
+          value instanceof HTMLElement &&
+          value.id.length > 0 &&
+          descriptionIds.includes(value.id),
+        activeButton:
+          document.activeElement instanceof HTMLButtonElement
+            ? normalize(
+                document.activeElement.getAttribute("aria-label") ??
+                  document.activeElement.textContent ??
+                  "",
+              )
+            : null,
+        viewportContained:
+          rect.left >= -epsilon &&
+          rect.right <= window.innerWidth + epsilon &&
+          rect.top >= -epsilon &&
+          rect.bottom <= window.innerHeight + epsilon,
+        noHorizontalOverflow:
+          document.documentElement.scrollWidth <= window.innerWidth + epsilon &&
+          document.body.scrollWidth <= window.innerWidth + epsilon,
+      };
+    })()`);
+
+    assertCondition(
+      result?.present === true &&
+        result.role === "dialog" &&
+        result.ariaModal === "true",
+      `${this.label}'s "${title}" confirmation is not an accessible modal dialog.`,
+    );
+    assertCondition(
+      result.title === title && result.description.length > 0,
+      `${this.label}'s "${title}" dialog is not correctly labelled and described.`,
+    );
+    assertCondition(
+      result.buttons.includes(confirmLabel) &&
+        result.buttons.includes(cancelLabel),
+      `${this.label}'s "${title}" dialog is missing its confirmation labels.`,
+    );
+    assertCondition(
+      valueLabel === null ||
+        (result.valueLabel === valueLabel && result.valueDescribed === true),
+      `${this.label}'s "${title}" dialog does not expose the selected value.`,
+    );
+    assertCondition(
+      result.activeButton === cancelLabel,
+      `${this.label}'s "${title}" dialog did not focus its safe cancel action.`,
+    );
+    assertCondition(
+      result.viewportContained && result.noHorizontalOverflow,
+      `${this.label}'s "${title}" dialog overflows its viewport.`,
+    );
+
+    return {
+      title: result.title,
+      confirmLabel,
+      cancelLabel,
+      valueLabel: result.valueLabel,
+      defaultFocus: result.activeButton,
+    };
+  }
+
+  async inspectFinishedLayout(viewport, expectedLeaderboard) {
+    await this.setViewport(viewport);
+    await this.waitForSelector(".finished-podium", "finished podium");
+    const result = await this.evaluate(`(() => {
+      window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+      const podium = document.querySelector(".finished-podium");
+      if (!(podium instanceof HTMLOListElement)) {
+        return { present: false };
+      }
+      const entries = [...podium.children].map((entry) => {
+        const rect = entry.getBoundingClientRect();
+        const mascot = entry.querySelector(".finished-podium__mascot");
+        const mascotRect = mascot?.getBoundingClientRect();
+        return {
+          classes: [...entry.classList],
+          nickname:
+            entry.querySelector(".finished-podium__nickname")?.textContent
+              ?.replace(/\\s+/gu, " ")
+              .trim() ?? "",
+          score:
+            entry.querySelector(".finished-podium__score")?.textContent
+              ?.replace(/\\s+/gu, " ")
+              .trim() ?? "",
+          rank:
+            entry.querySelector(".finished-podium__step")
+              ?.getAttribute("data-rank") ?? null,
+          centerX: rect.left + rect.width / 2,
+          top: rect.top,
+          mascotSize:
+            mascotRect === undefined
+              ? 0
+              : Math.max(mascotRect.width, mascotRect.height),
+        };
+      });
+      const rematch = document.querySelector(".finished-rematch-button");
+      const leave = document.querySelector(
+        ".finished-actions .game-sidebar-leave button",
+      );
+      const epsilon = 1;
+      return {
+        present: true,
+        entries,
+        podiumClasses: [...podium.classList],
+        ariaLabel: podium.getAttribute("aria-label"),
+        rematchEnabled:
+          rematch instanceof HTMLButtonElement && !rematch.disabled,
+        leaveEnabled:
+          leave instanceof HTMLButtonElement && !leave.disabled,
+        noHorizontalOverflow:
+          document.documentElement.scrollWidth <= window.innerWidth + epsilon &&
+          document.body.scrollWidth <= window.innerWidth + epsilon,
+      };
+    })()`);
+
+    const winners = expectedLeaderboard.filter((entry) => entry.rank === 1);
+    const defaultPodium = expectedLeaderboard.slice(0, 3);
+    const boundaryRank = defaultPodium.at(-1)?.rank;
+    const expectedPodium =
+      winners.length > 1
+        ? winners
+        : boundaryRank === undefined
+          ? []
+          : expectedLeaderboard.filter(
+              (entry) => entry.rank <= boundaryRank,
+            );
+    assertCondition(
+      result?.present === true && result.ariaLabel === "Podium final",
+      `The final podium is missing at ${viewport.width}x${viewport.height}.`,
+    );
+    assertCondition(
+      result.noHorizontalOverflow,
+      `The finished screen causes horizontal overflow at ${viewport.width}x${viewport.height}.`,
+    );
+    assertCondition(
+      result.entries.length === expectedPodium.length &&
+        result.entries.every((entry, index) => {
+          const expected = expectedPodium[index];
+          const pointsLabel = `${expected.score} point${
+            expected.score === 1 ? "" : "s"
+          }`;
+          return (
+            entry.nickname === expected.player.nickname &&
+            entry.score === pointsLabel &&
+            entry.rank === String(expected.rank) &&
+            entry.classes.includes(
+              `finished-podium__entry--slot-${index + 1}`,
+            )
+          );
+        }),
+      `The final podium order or scores are incorrect at ${viewport.width}x${viewport.height}.`,
+    );
+    assertCondition(
+      result.rematchEnabled && result.leaveEnabled,
+      `The finished screen lost its rematch or leave action at ${viewport.width}x${viewport.height}.`,
+    );
+
+    if (
+      result.entries.length === 3 &&
+      !result.podiumClasses.includes("finished-podium--shared-first") &&
+      !result.podiumClasses.includes("finished-podium--extended")
+    ) {
+      const [first, second, third] = result.entries;
+      if (viewport.width <= 360) {
+        assertCondition(
+          first.top <= second.top && second.top <= third.top,
+          `The compact podium order is wrong at ${viewport.width}x${viewport.height}.`,
+        );
+      } else {
+        assertCondition(
+          second.centerX < first.centerX &&
+            first.centerX < third.centerX,
+          `The winner is not centered on the podium at ${viewport.width}x${viewport.height}.`,
+        );
+      }
+      assertCondition(
+        first.mascotSize >= second.mascotSize &&
+          first.mascotSize >= third.mascotSize,
+        `The winner mascot is not emphasized at ${viewport.width}x${viewport.height}.`,
+      );
+    }
+
+    return {
+      viewport: `${viewport.width}x${viewport.height}`,
+      order: result.entries.map((entry) => entry.nickname),
+      scores: result.entries.map((entry) => entry.score),
+      rematchEnabled: result.rematchEnabled,
+      leaveEnabled: result.leaveEnabled,
+      noHorizontalOverflow: true,
+    };
   }
 
   async inspectRecoveryOverlay(viewport) {
@@ -1327,6 +2079,632 @@ async function setPlayerReady(page, observer, nickname) {
   );
 }
 
+function rgbIsNear(actual, expected, tolerance = 4) {
+  return (
+    Array.isArray(actual) &&
+    actual.length === 4 &&
+    actual.slice(0, 3).every(
+      (channel, index) =>
+        Math.abs(channel - expected[index]) <= tolerance,
+    ) &&
+    actual[3] === 255
+  );
+}
+
+async function waitForPhaseAcrossClients(
+  pages,
+  phase,
+  turnNumber,
+  description,
+) {
+  const states = await Promise.all(
+    pages.map((page) =>
+      page.waitForRoomState(
+        (room) =>
+          room.game?.phase === phase &&
+          (turnNumber === null ||
+            room.game.currentTurnNumber === turnNumber),
+        description,
+      ),
+    ),
+  );
+  return states[0];
+}
+
+async function assertToolSelected(page, ariaLabel) {
+  const selected = await page.evaluate(`(() => {
+    const button = document.querySelector(
+      ${JSON.stringify(`button[aria-label="${ariaLabel}"]`)},
+    );
+    return (
+      button instanceof HTMLButtonElement &&
+      button.getAttribute("aria-pressed") === "true"
+    );
+  })()`);
+  assertCondition(
+    selected === true,
+    `${page.label}'s ${ariaLabel} drawing tool was not selected.`,
+  );
+}
+
+async function exerciseDetailedDrawingTurn({
+  drawerPage,
+  phaseObserver,
+  screenshotDirectory,
+}) {
+  await drawerPage.setViewport(DESKTOP_VIEWPORT);
+  await drawerPage.waitForSelector(".drawing-canvas", "drawer canvas");
+
+  await drawerPage.clickAccessibleButton("Stylo");
+  await assertToolSelected(drawerPage, "Stylo");
+  await drawerPage.clickAccessibleButton("Couleur Noir");
+  await drawerPage.drawNormalizedPath(".drawing-canvas", [
+    [0.3, 0.3],
+    [0.7, 0.3],
+    [0.7, 0.7],
+    [0.3, 0.7],
+    [0.3, 0.3],
+  ]);
+
+  const sampleBeforeFill = await drawerPage.sampleCanvas(0.5, 0.5);
+  assertCondition(
+    rgbIsNear(sampleBeforeFill, [255, 255, 255]),
+    "The closed test shape was not white before using the bucket.",
+  );
+
+  await drawerPage.clickAccessibleButton("Pot de peinture");
+  await assertToolSelected(drawerPage, "Pot de peinture");
+  await drawerPage.clickAccessibleButton("Couleur Jaune");
+  await drawerPage.clickElementAt(".drawing-canvas", 0.5, 0.5);
+  const sampleAfterFill = await waitUntil(
+    async () => {
+      const sample = await drawerPage.sampleCanvas(0.5, 0.5);
+      return rgbIsNear(sample, [253, 216, 53], 6) ? sample : false;
+    },
+    "a yellow bucket fill inside the closed shape",
+    drawerPage.timeoutMs,
+    () => drawerPage.diagnostics(),
+  );
+
+  await drawerPage.clickAccessibleButton("Gomme");
+  await assertToolSelected(drawerPage, "Gomme");
+  await drawerPage.drawNormalizedPath(".drawing-canvas", [
+    [0.27, 0.5],
+    [0.33, 0.5],
+  ]);
+  const sampleAfterEraser = await waitUntil(
+    async () => {
+      const sample = await drawerPage.sampleCanvas(0.3, 0.5);
+      return rgbIsNear(sample, [255, 255, 255]) ? sample : false;
+    },
+    "a white gap created by the eraser",
+    drawerPage.timeoutMs,
+    () => drawerPage.diagnostics(),
+  );
+  await drawerPage.clickAccessibleButton("Annuler");
+  const sampleAfterUndo = await waitUntil(
+    async () => {
+      const sample = await drawerPage.sampleCanvas(0.3, 0.5);
+      return rgbIsNear(sample, [17, 17, 17]) ? sample : false;
+    },
+    "the erased outline restored by undo",
+    drawerPage.timeoutMs,
+    () => drawerPage.diagnostics(),
+  );
+  const undoPreservedDrawing = await drawerPage.evaluate(`(() => {
+    const clear = document.querySelector(
+      "button[aria-label='Tout effacer']",
+    );
+    const actionCount =
+      document.querySelector(".drawing-editor-heading > p")
+        ?.textContent?.replace(/\\s+/gu, " ")
+        .trim() ?? "";
+    return {
+      clearEnabled:
+        clear instanceof HTMLButtonElement && !clear.disabled,
+      actionCount,
+    };
+  })()`);
+  assertCondition(
+    undoPreservedDrawing?.clearEnabled === true &&
+      /^2 actions?$/u.test(undoPreservedDrawing.actionCount),
+    "Undo did not remove only the last eraser action.",
+  );
+
+  await drawerPage.clickAccessibleButton("Tout effacer");
+  const clearDialogChecks = [];
+  for (const viewport of VIEWPORTS) {
+    await drawerPage.setViewport(viewport);
+    clearDialogChecks.push({
+      viewport: `${viewport.width}x${viewport.height}`,
+      ...(await drawerPage.inspectDialog({
+        title: "Tout effacer ?",
+        confirmLabel: "Tout effacer",
+        cancelLabel: "Garder mon dessin",
+      })),
+    });
+  }
+  await drawerPage.setViewport(DESKTOP_VIEWPORT);
+  const clearDialogScreenshot = await drawerPage.captureScreenshot(
+    join(screenshotDirectory, "drawing-clear-dialog.png"),
+  );
+  await drawerPage.clickAccessibleButton(
+    "Garder mon dessin",
+    DIALOG_SELECTOR,
+  );
+  await drawerPage.waitForNoSelector(
+    DIALOG_SELECTOR,
+    "cancelled clear dialog",
+  );
+  assertCondition(
+    phaseObserver.latestRoomState?.game?.phase === "DRAWING",
+    "Cancelling the clear dialog changed the game phase.",
+  );
+
+  const stateAfterClearCancel = await drawerPage.evaluate(`(() => ({
+    actionCount:
+      document.querySelector(".drawing-editor-heading > p")
+        ?.textContent?.replace(/\\s+/gu, " ")
+        .trim() ?? "",
+    focusedLabel:
+      document.activeElement instanceof HTMLButtonElement
+        ? document.activeElement.getAttribute("aria-label")
+        : null,
+  }))()`);
+  assertCondition(
+    /^2 actions?$/u.test(stateAfterClearCancel?.actionCount ?? "") &&
+      stateAfterClearCancel?.focusedLabel === "Tout effacer",
+    "Cancelling the clear dialog changed the drawing or lost its trigger focus.",
+  );
+
+  await drawerPage.clickAccessibleButton("Tout effacer");
+  await drawerPage.inspectDialog({
+    title: "Tout effacer ?",
+    confirmLabel: "Tout effacer",
+    cancelLabel: "Garder mon dessin",
+  });
+  await drawerPage.clickAccessibleButton(
+    "Tout effacer",
+    DIALOG_SELECTOR,
+  );
+  await drawerPage.waitForNoSelector(
+    DIALOG_SELECTOR,
+    "confirmed clear dialog",
+  );
+  const clearResult = await drawerPage.evaluate(`(() => {
+    const actionCount =
+      document.querySelector(".drawing-editor-heading > p")
+        ?.textContent?.replace(/\\s+/gu, " ")
+        .trim() ?? "";
+    const submit = document.querySelector(".drawing-submit-button");
+    return {
+      actionCount,
+      submitDisabled:
+        submit instanceof HTMLButtonElement && submit.disabled,
+      focusFallback:
+        document.activeElement instanceof HTMLElement &&
+        document.activeElement.classList.contains("game-phase-layout"),
+    };
+  })()`);
+  assertCondition(
+    clearResult?.actionCount === "0 action" &&
+      clearResult.submitDisabled === true &&
+      clearResult.focusFallback === true,
+    "Confirming clear did not empty the drawing, disable submission, or preserve a logical focus target.",
+  );
+
+  await drawerPage.clickAccessibleButton("Stylo");
+  await drawerPage.clickAccessibleButton("Couleur Violet");
+  await drawerPage.drawNormalizedPath(".drawing-canvas", [
+    [0.2, 0.3],
+    [0.5, 0.55],
+    [0.8, 0.7],
+  ]);
+
+  await drawerPage.clickAccessibleButton("Valider le dessin");
+  const submitDialogCheck = await drawerPage.inspectDialog({
+    title: "Valider le dessin ?",
+    confirmLabel: "Valider mon dessin",
+    cancelLabel: "Continuer \u00e0 dessiner",
+  });
+  await drawerPage.pressKey("Escape");
+  await drawerPage.waitForNoSelector(
+    DIALOG_SELECTOR,
+    "drawing submission dialog after Escape",
+  );
+  assertCondition(
+    phaseObserver.latestRoomState?.game?.phase === "DRAWING",
+    "Pressing Escape in the drawing dialog changed the game phase.",
+  );
+
+  await drawerPage.clickAccessibleButton("Valider le dessin");
+  await drawerPage.inspectDialog({
+    title: "Valider le dessin ?",
+    confirmLabel: "Valider mon dessin",
+    cancelLabel: "Continuer \u00e0 dessiner",
+  });
+  await drawerPage.clickAccessibleButton(
+    "Valider mon dessin",
+    DIALOG_SELECTOR,
+  );
+
+  return {
+    sampleBeforeFill,
+    sampleAfterFill,
+    sampleAfterEraser,
+    sampleAfterUndo,
+    clearDialogChecks,
+    clearResult,
+    submitDialogCheck,
+    clearDialogScreenshot,
+  };
+}
+
+async function submitSimpleDrawing(drawerPage) {
+  await drawerPage.setViewport(DESKTOP_VIEWPORT);
+  await drawerPage.waitForSelector(".drawing-canvas", "drawer canvas");
+  await drawerPage.clickAccessibleButton("Stylo");
+  await drawerPage.clickAccessibleButton("Couleur Bleu");
+  await drawerPage.drawNormalizedPath(".drawing-canvas", [
+    [0.2, 0.25],
+    [0.42, 0.48],
+    [0.8, 0.72],
+  ]);
+  await drawerPage.clickAccessibleButton("Valider le dessin");
+  await drawerPage.inspectDialog({
+    title: "Valider le dessin ?",
+    confirmLabel: "Valider mon dessin",
+    cancelLabel: "Continuer \u00e0 dessiner",
+  });
+  await drawerPage.clickAccessibleButton(
+    "Valider mon dessin",
+    DIALOG_SELECTOR,
+  );
+}
+
+async function submitTurnGuesses({
+  phaseObserver,
+  pagesByPlayerId,
+  roomState,
+  turnNumber,
+  shouldTestCancellation,
+}) {
+  const drawerId = roomState.game.currentDrawer.id;
+  const voters = roomState.players.filter(
+    (player) => player.id !== drawerId,
+  );
+  let cancellationTested = false;
+  let guessDialogCheck = null;
+
+  for (const [voterIndex, voter] of voters.entries()) {
+    const voterPage = pagesByPlayerId.get(voter.id);
+    assertCondition(
+      voterPage !== undefined,
+      `No real browser page is mapped to voter ${voter.id}.`,
+    );
+    await voterPage.setViewport(DESKTOP_VIEWPORT);
+    await voterPage.waitForSelector(
+      ".guess-scale",
+      `${voter.nickname}'s guess scale`,
+    );
+    const guessValue = ((turnNumber + voterIndex * 3) % 10) + 1;
+    await voterPage.clickAccessibleButton(
+      `Choisir ${guessValue} sur 10`,
+    );
+
+    const previousSubmittedCount =
+      phaseObserver.latestRoomState?.game?.voting
+        ?.submittedGuessCount ?? voterIndex;
+    await voterPage.clickAccessibleButton("Valider mon estimation");
+    const valueLabel =
+      `Estimation choisie : ${guessValue} sur 10`;
+    const currentDialogCheck = await voterPage.inspectDialog({
+      title: "Valider votre estimation ?",
+      confirmLabel: "Valider mon estimation",
+      cancelLabel: "Modifier mon choix",
+      valueLabel,
+    });
+    guessDialogCheck ??= currentDialogCheck;
+
+    if (shouldTestCancellation && !cancellationTested) {
+      await voterPage.clickAccessibleButton(
+        "Modifier mon choix",
+        DIALOG_SELECTOR,
+      );
+      await voterPage.waitForNoSelector(
+        DIALOG_SELECTOR,
+        "cancelled guess dialog",
+      );
+      await delay(100);
+      assertCondition(
+        phaseObserver.latestRoomState?.game?.phase === "VOTING" &&
+          phaseObserver.latestRoomState.game.voting
+            ?.submittedGuessCount === previousSubmittedCount,
+        "Cancelling the guess dialog submitted a guess or changed the phase.",
+      );
+      cancellationTested = true;
+      await voterPage.clickAccessibleButton("Valider mon estimation");
+      await voterPage.inspectDialog({
+        title: "Valider votre estimation ?",
+        confirmLabel: "Valider mon estimation",
+        cancelLabel: "Modifier mon choix",
+        valueLabel,
+      });
+    }
+
+    await voterPage.clickAccessibleButton(
+      "Valider mon estimation",
+      DIALOG_SELECTOR,
+    );
+
+    if (voterIndex < voters.length - 1) {
+      await phaseObserver.waitForRoomState(
+        (room) =>
+          room.game?.phase === "VOTING" &&
+          room.game.currentTurnNumber === turnNumber &&
+          room.game.voting?.submittedGuessCount ===
+            previousSubmittedCount + 1,
+        `guess ${voterIndex + 1} of turn ${turnNumber}`,
+      );
+    }
+  }
+
+  await phaseObserver.waitForRoomState(
+    (room) =>
+      room.game?.phase === "REVEAL" &&
+      room.game.currentTurnNumber === turnNumber,
+    `reveal after all guesses in turn ${turnNumber}`,
+  );
+
+  return {
+    cancellationTested,
+    guessDialogCheck,
+  };
+}
+
+async function runUiScenario({
+  hostPage,
+  pagesByPlayerId,
+  screenshotDirectory,
+}) {
+  const pages = [...pagesByPlayerId.values()];
+  assertCondition(
+    pages.length === 3 &&
+      new Set(pages).size === 3 &&
+      pages.includes(hostPage),
+    "The production UI scenario did not map three distinct playerIds to browser pages.",
+  );
+
+  await Promise.all(
+    pages.map((page) => page.installNativeConfirmGuard()),
+  );
+
+  const firstDrawingState = await waitForPhaseAcrossClients(
+    pages,
+    "DRAWING",
+    1,
+    "first drawing phase",
+  );
+  assertCondition(
+    firstDrawingState.game.totalTurns === 6 &&
+      firstDrawingState.game.totalRounds === 2,
+    "The three-player production scenario is not the expected six-turn game.",
+  );
+
+  const screenshotPaths = [];
+  const drawingVisualChecks = [];
+  const completedTurnIds = new Set();
+  let detailedDrawingCheck = null;
+  let guessDialogCheck = null;
+  let guessCancellationTested = false;
+
+  for (
+    let turnNumber = 1;
+    turnNumber <= firstDrawingState.game.totalTurns;
+    turnNumber += 1
+  ) {
+    const drawingState = await waitForPhaseAcrossClients(
+      pages,
+      "DRAWING",
+      turnNumber,
+      `drawing phase for turn ${turnNumber}`,
+    );
+    const drawerId = drawingState.game.currentDrawer.id;
+    const drawerPage = pagesByPlayerId.get(drawerId);
+    const observerPage = pages.find(
+      (candidate) => candidate !== drawerPage,
+    );
+    assertCondition(
+      drawerPage !== undefined && observerPage !== undefined,
+      `Turn ${turnNumber} has no mapped drawer or observer page.`,
+    );
+    completedTurnIds.add(drawingState.game.turnId);
+    await drawerPage.waitForSelector(
+      ".drawing-canvas",
+      `drawing editor for turn ${turnNumber}`,
+    );
+    await observerPage.waitForSelector(
+      ".drawing-observer-stage",
+      `waiting stage for turn ${turnNumber}`,
+    );
+
+    if (turnNumber === 1) {
+      for (const viewport of VIEWPORTS) {
+        const waiting = await observerPage.inspectWaitingLayout(
+          viewport,
+        );
+        const editor = await drawerPage.inspectDrawingLayout(viewport);
+        assertCondition(
+          Math.abs(waiting.width - editor.width) <= 2 &&
+            (viewport.width < 900 ||
+              Math.abs(waiting.height - editor.height) <=
+                Math.max(24, editor.height * 0.12)),
+          `The drawing and waiting stages are not harmonized at ${viewport.width}x${viewport.height}: waiting ${waiting.width}x${waiting.height}, canvas ${editor.width}x${editor.height}.`,
+        );
+        drawingVisualChecks.push({
+          viewport: waiting.viewport,
+          waiting,
+          editor,
+        });
+      }
+
+      await observerPage.setViewport(DESKTOP_VIEWPORT);
+      await drawerPage.setViewport(DESKTOP_VIEWPORT);
+      screenshotPaths.push(
+        await observerPage.captureScreenshot(
+          join(screenshotDirectory, "drawing-waiting.png"),
+        ),
+      );
+      screenshotPaths.push(
+        await drawerPage.captureScreenshot(
+          join(screenshotDirectory, "drawing-editor.png"),
+        ),
+      );
+      detailedDrawingCheck = await exerciseDetailedDrawingTurn({
+        drawerPage,
+        phaseObserver: hostPage,
+        screenshotDirectory,
+      });
+      screenshotPaths.push(
+        detailedDrawingCheck.clearDialogScreenshot,
+      );
+    } else {
+      await submitSimpleDrawing(drawerPage);
+    }
+
+    const votingState = await waitForPhaseAcrossClients(
+      pages,
+      "VOTING",
+      turnNumber,
+      `voting phase for turn ${turnNumber}`,
+    );
+    const voteCheck = await submitTurnGuesses({
+      phaseObserver: hostPage,
+      pagesByPlayerId,
+      roomState: votingState,
+      turnNumber,
+      shouldTestCancellation: !guessCancellationTested,
+    });
+    guessCancellationTested ||= voteCheck.cancellationTested;
+    guessDialogCheck ??= voteCheck.guessDialogCheck;
+
+    await waitForPhaseAcrossClients(
+      pages,
+      "REVEAL",
+      turnNumber,
+      `reveal phase for turn ${turnNumber}`,
+    );
+    await hostPage.setViewport(DESKTOP_VIEWPORT);
+    await hostPage.waitForSelector(
+      ".reveal-continue-button",
+      `host continuation for turn ${turnNumber}`,
+    );
+    await hostPage.clickElementAt(".reveal-continue-button");
+
+    if (turnNumber < firstDrawingState.game.totalTurns) {
+      await hostPage.waitForRoomState(
+        (room) =>
+          room.game?.phase === "ROUND_INTRO" &&
+          room.game.currentTurnNumber === turnNumber + 1,
+        `round introduction after turn ${turnNumber}`,
+      );
+    }
+  }
+
+  const finishedRoom = await waitForPhaseAcrossClients(
+    pages,
+    "FINISHED",
+    firstDrawingState.game.totalTurns,
+    "finished phase",
+  );
+  const finished = finishedRoom.game.finished;
+  assertCondition(
+    finished !== null &&
+      finished.completedTurns === 6 &&
+      finished.completedRounds === 2,
+    "The final state does not report all six completed turns.",
+  );
+  const finishedVisualChecks = [];
+  for (const viewport of VIEWPORTS) {
+    finishedVisualChecks.push(
+      await hostPage.inspectFinishedLayout(
+        viewport,
+        finished.leaderboard,
+      ),
+    );
+  }
+  await hostPage.setViewport(DESKTOP_VIEWPORT);
+  screenshotPaths.push(
+    await hostPage.captureScreenshot(
+      join(screenshotDirectory, "finished-podium.png"),
+    ),
+  );
+
+  for (const [playerId, page] of pagesByPlayerId) {
+    const actions = await page.evaluate(`(() => {
+      const leave = document.querySelector(
+        ".finished-actions .game-sidebar-leave button",
+      );
+      const rematch = document.querySelector(
+        ".finished-rematch-button",
+      );
+      return {
+        leaveEnabled:
+          leave instanceof HTMLButtonElement && !leave.disabled,
+        hasRematch: rematch instanceof HTMLButtonElement,
+        rematchEnabled:
+          rematch instanceof HTMLButtonElement && !rematch.disabled,
+      };
+    })()`);
+    const isHost =
+      finishedRoom.players.find((player) => player.id === playerId)
+        ?.isHost === true;
+    assertCondition(
+      actions?.leaveEnabled === true &&
+        (isHost
+          ? actions.hasRematch && actions.rematchEnabled
+          : !actions.hasRematch),
+      `${page.label}'s final rematch or leave actions are incorrect.`,
+    );
+  }
+
+  const nativeConfirmCalls = Object.fromEntries(
+    await Promise.all(
+      [...pagesByPlayerId].map(async ([playerId, page]) => [
+        playerId,
+        await page.getNativeConfirmCallCount(),
+      ]),
+    ),
+  );
+  assertCondition(
+    Object.values(nativeConfirmCalls).every((count) => count === 0),
+    "A drawing or guessing flow invoked window.confirm.",
+  );
+  assertCondition(
+    completedTurnIds.size === 6 && guessCancellationTested,
+    "The UI scenario did not complete six distinct turns or its guess cancellation check.",
+  );
+
+  return {
+    playerPages: Object.fromEntries(
+      [...pagesByPlayerId].map(([playerId, page]) => [
+        playerId,
+        page.label,
+      ]),
+    ),
+    totalTurnsCompleted: completedTurnIds.size,
+    nativeConfirmCalls,
+    drawingVisualChecks,
+    detailedDrawingCheck,
+    guessDialogCheck,
+    guessCancellationTested,
+    finishedVisualChecks,
+    finalLeaderboard: finished.leaderboard,
+    screenshotDirectory,
+    screenshotPaths,
+  };
+}
+
 async function runBrowserScenario(controller, baseUrl) {
   controller.baseUrl = baseUrl;
   const hostContext = await controller.createContext();
@@ -1345,14 +2723,14 @@ async function runBrowserScenario(controller, baseUrl) {
   const hostCreated = await createRoom(host, "HostBrowserCheck");
   const roomCode = hostCreated.state.code;
   const hostPlayerId = hostCreated.storage.session.playerId;
-  await joinRoom(
+  const guestOneJoined = await joinRoom(
     guestOne,
     baseUrl,
     "GuestOneCheck",
     roomCode,
     2,
   );
-  await joinRoom(
+  const guestTwoJoined = await joinRoom(
     guestTwo,
     baseUrl,
     "GuestTwoCheck",
@@ -1535,6 +2913,32 @@ async function runBrowserScenario(controller, baseUrl) {
     "host reconnection broadcast after manual retry",
   );
 
+  const guestOnePlayerId = guestOneJoined.storage.session.playerId;
+  const guestTwoPlayerId = guestTwoJoined.storage.session.playerId;
+  assertCondition(
+    typeof guestOnePlayerId === "string" &&
+      typeof guestTwoPlayerId === "string" &&
+      new Set([
+        hostPlayerId,
+        guestOnePlayerId,
+        guestTwoPlayerId,
+      ]).size === 3,
+    "The browser clients do not have three distinct playerIds.",
+  );
+  const pagesByPlayerId = new Map([
+    [hostPlayerId, secondTab],
+    [guestOnePlayerId, guestOne],
+    [guestTwoPlayerId, guestTwo],
+  ]);
+  const screenshotDirectory = await mkdtemp(
+    join(tmpdir(), "drawing-game-ui-check-"),
+  );
+  const uiChecks = await runUiScenario({
+    hostPage: secondTab,
+    pagesByPlayerId,
+    screenshotDirectory,
+  });
+
   return {
     roomCode,
     playerCount: afterManualRetry.playerCount,
@@ -1546,6 +2950,7 @@ async function runBrowserScenario(controller, baseUrl) {
     manualRetryRestored: true,
     loadingStateObserved: loadingState.loading === true,
     visualChecks,
+    uiChecks,
   };
 }
 

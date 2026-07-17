@@ -365,9 +365,12 @@ describe("compact game phase structure", () => {
       'aria-label="Zone de dessin interactive au format quatre tiers"',
     );
     expect(markup).toContain('aria-label="Outils de dessin"');
-    expect(text).toContain("Gomme");
-    expect(text).toContain("Annuler");
-    expect(text).toContain("Tout effacer");
+    expect(markup).toContain('aria-label="Stylo"');
+    expect(markup).toContain('aria-label="Gomme"');
+    expect(markup).toContain('aria-label="Pot de peinture"');
+    expect(markup).toContain('aria-label="Annuler"');
+    expect(markup).toContain('aria-label="Tout effacer"');
+    expect(markup).toContain('data-drawing-icon="fill"');
     expect(markup).toContain("drawing-submit-button");
     expect(text).toContain("Valider le dessin");
     expect(text).toContain("Niveau à représenter : 7 / 10");

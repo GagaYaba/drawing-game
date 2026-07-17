@@ -83,6 +83,12 @@ function createValidDrawing(): DrawingDocument {
         width: DRAWING_ALLOWED_STROKE_WIDTHS[2],
         points: [{ x: 0.4, y: 0.5 }],
       },
+      {
+        tool: "fill",
+        color: DRAWING_COLOR_PALETTE[6],
+        width: DRAWING_ALLOWED_STROKE_WIDTHS[0],
+        points: [{ x: 0.25, y: 0.75 }],
+      },
     ],
   };
 }
@@ -521,6 +527,14 @@ describe("Socket.IO drawing submission integration", () => {
       expect(
         acknowledgedGame.submittedDrawing?.document.strokes[1]?.color,
       ).toBe(DRAWING_BACKGROUND_COLOR);
+      expect(
+        acknowledgedGame.submittedDrawing?.document.strokes[2],
+      ).toEqual({
+        tool: "fill",
+        color: DRAWING_COLOR_PALETTE[6],
+        width: DRAWING_ALLOWED_STROKE_WIDTHS[0],
+        points: [{ x: 0.25, y: 0.75 }],
+      });
 
       for (const state of receivedVotingStates) {
         expect(state).toEqual(acknowledgement.room);

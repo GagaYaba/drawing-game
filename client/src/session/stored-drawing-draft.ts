@@ -4,11 +4,15 @@ import {
   DRAWING_BACKGROUND_COLOR,
   DRAWING_COLOR_PALETTE,
   DRAWING_DOCUMENT_VERSION,
+  DRAWING_LEGACY_DOCUMENT_VERSION,
+  DRAWING_MAX_FILL_OPERATIONS,
   DRAWING_MAX_POINTS_PER_STROKE,
   DRAWING_MAX_STROKES,
   DRAWING_MAX_TOTAL_POINTS,
   type DrawingColor,
   type DrawingDocument,
+  type DrawingFillOperation,
+  type DrawingPathStroke,
   type DrawingPoint,
   type DrawingStroke,
   type DrawingStrokeWidth,
@@ -83,7 +87,7 @@ function isRoomCode(value: unknown): value is string {
 }
 
 function isDrawingTool(value: unknown): value is DrawingTool {
-  return value === "pen" || value === "eraser";
+  return value === "pen" || value === "eraser" || value === "fill";
 }
 
 function isDrawingColor(value: unknown): value is DrawingColor {
@@ -119,7 +123,12 @@ function parsePoint(value: unknown): DrawingPoint | null {
   return { x: value.x, y: value.y };
 }
 
-function parseStroke(value: unknown): DrawingStroke | null {
+function parseStroke(
+  value: unknown,
+  documentVersion:
+    | typeof DRAWING_LEGACY_DOCUMENT_VERSION
+    | typeof DRAWING_DOCUMENT_VERSION,
+): DrawingStroke | null {
   if (
     !isPlainRecord(value) ||
     !hasExactOwnKeys(value, ["tool", "color", "width", "points"]) ||
@@ -131,6 +140,28 @@ function parseStroke(value: unknown): DrawingStroke | null {
     value.points.length > DRAWING_MAX_POINTS_PER_STROKE
   ) {
     return null;
+  }
+
+  if (value.tool === "fill") {
+    if (
+      documentVersion === DRAWING_LEGACY_DOCUMENT_VERSION ||
+      !isDrawingColor(value.color) ||
+      value.points.length !== 1
+    ) {
+      return null;
+    }
+
+    const seed = parsePoint(value.points[0]);
+    if (seed === null) {
+      return null;
+    }
+
+    return {
+      tool: "fill",
+      color: value.color,
+      width: value.width,
+      points: [seed],
+    } satisfies DrawingFillOperation;
   }
 
   const validColor =
@@ -156,7 +187,7 @@ function parseStroke(value: unknown): DrawingStroke | null {
       value.tool === "eraser" ? DRAWING_BACKGROUND_COLOR : value.color,
     width: value.width,
     points,
-  };
+  } satisfies DrawingPathStroke;
 }
 
 function parseDrawingDocument(value: unknown): DrawingDocument | null {
@@ -168,7 +199,8 @@ function parseDrawingDocument(value: unknown): DrawingDocument | null {
       "backgroundColor",
       "strokes",
     ]) ||
-    value.version !== DRAWING_DOCUMENT_VERSION ||
+    (value.version !== DRAWING_DOCUMENT_VERSION &&
+      value.version !== DRAWING_LEGACY_DOCUMENT_VERSION) ||
     value.aspectRatio !== DRAWING_ASPECT_RATIO ||
     value.backgroundColor !== DRAWING_BACKGROUND_COLOR ||
     !Array.isArray(value.strokes) ||
@@ -179,11 +211,19 @@ function parseDrawingDocument(value: unknown): DrawingDocument | null {
 
   const strokes: DrawingStroke[] = [];
   let totalPointCount = 0;
+  let fillOperationCount = 0;
 
   for (const receivedStroke of value.strokes) {
-    const stroke = parseStroke(receivedStroke);
+    const stroke = parseStroke(receivedStroke, value.version);
     if (stroke === null) {
       return null;
+    }
+
+    if (stroke.tool === "fill") {
+      fillOperationCount += 1;
+      if (fillOperationCount > DRAWING_MAX_FILL_OPERATIONS) {
+        return null;
+      }
     }
 
     totalPointCount += stroke.points.length;

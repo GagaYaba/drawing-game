@@ -4,10 +4,14 @@ import {
   DRAWING_BACKGROUND_COLOR,
   DRAWING_COLOR_PALETTE,
   DRAWING_DOCUMENT_VERSION,
+  DRAWING_LEGACY_DOCUMENT_VERSION,
+  DRAWING_MAX_FILL_OPERATIONS,
   DRAWING_MAX_POINTS_PER_STROKE,
   DRAWING_MAX_STROKES,
   DRAWING_MAX_TOTAL_POINTS,
   type DrawingDocument,
+  type DrawingFillOperation,
+  type DrawingPathStroke,
   type DrawingPoint,
   type DrawingStroke,
   type SubmitDrawingPayload,
@@ -27,13 +31,27 @@ function createPoints(count: number): DrawingPoint[] {
 }
 
 function createStroke(
-  overrides: Partial<DrawingStroke> = {},
-): DrawingStroke {
+  overrides: Partial<DrawingPathStroke> = {},
+): DrawingPathStroke {
   return {
     tool: "pen",
     color: DRAWING_COLOR_PALETTE[0],
     width: DRAWING_ALLOWED_STROKE_WIDTHS[1],
     points: [{ x: 0.25, y: 0.75 }],
+    ...overrides,
+  };
+}
+
+function createFill(
+  overrides: Partial<Omit<DrawingFillOperation, "tool" | "points">> & {
+    points?: [DrawingPoint];
+  } = {},
+): DrawingFillOperation {
+  return {
+    tool: "fill",
+    color: DRAWING_COLOR_PALETTE[1],
+    width: DRAWING_ALLOWED_STROKE_WIDTHS[1],
+    points: [{ x: 0.5, y: 0.5 }],
     ...overrides,
   };
 }
@@ -121,6 +139,52 @@ describe("validateSubmitDrawingPayload", () => {
     },
   );
 
+  it("accepte un remplissage v2 avec un unique seed normalisé", () => {
+    const fill = createFill({
+      color: "#FDD835",
+      points: [{ x: 0.4, y: 0.6 }],
+    });
+    const result = validateSubmitDrawingPayload(createPayload([fill]));
+
+    expect(result.success).toBe(true);
+    if (!result.success) {
+      throw new Error(`Validation inattendue : ${result.error.code}`);
+    }
+
+    expect(result.document.version).toBe(DRAWING_DOCUMENT_VERSION);
+    expect(result.document.strokes[0]).toEqual(fill);
+    expect(result.document.strokes[0]).not.toBe(fill);
+    expect(result.document.strokes[0]?.points[0]).not.toBe(fill.points[0]);
+  });
+
+  it("accepte un document v1 historique et le canonicalise en v2", () => {
+    const legacyDrawing = {
+      ...createDocument(),
+      version: DRAWING_LEGACY_DOCUMENT_VERSION,
+    };
+    const result = validateSubmitDrawingPayload({ drawing: legacyDrawing });
+
+    expect(result.success).toBe(true);
+    if (!result.success) {
+      throw new Error(`Validation inattendue : ${result.error.code}`);
+    }
+
+    expect(result.document.version).toBe(DRAWING_DOCUMENT_VERSION);
+    expect(result.document.strokes).toEqual(legacyDrawing.strokes);
+  });
+
+  it("refuse un remplissage déclaré dans un document v1", () => {
+    expectValidationError(
+      {
+        drawing: {
+          ...createDocument([createFill()]),
+          version: DRAWING_LEGACY_DOCUMENT_VERSION,
+        },
+      },
+      "INVALID_DRAWING",
+    );
+  });
+
   it("normalise la couleur de la gomme vers le fond blanc", () => {
     const result = validateSubmitDrawingPayload(
       createPayload([
@@ -202,6 +266,34 @@ describe("validateSubmitDrawingPayload", () => {
     expectValidationError(createPayload(strokes), "DRAWING_TOO_LARGE");
   });
 
+  it("accepte exactement la limite de remplissages", () => {
+    const fills = Array.from(
+      { length: DRAWING_MAX_FILL_OPERATIONS },
+      (_, index) =>
+        createFill({
+          points: [
+            {
+              x: index / DRAWING_MAX_FILL_OPERATIONS,
+              y: 0.5,
+            },
+          ],
+        }),
+    );
+
+    expect(validateSubmitDrawingPayload(createPayload(fills)).success).toBe(
+      true,
+    );
+  });
+
+  it("refuse un remplissage au-delà de la limite dédiée", () => {
+    const fills = Array.from(
+      { length: DRAWING_MAX_FILL_OPERATIONS + 1 },
+      () => createFill(),
+    );
+
+    expectValidationError(createPayload(fills), "DRAWING_TOO_LARGE");
+  });
+
   it.each([
     ["x négatif", { x: -0.001, y: 0.5 }],
     ["x supérieur à un", { x: 1.001, y: 0.5 }],
@@ -239,6 +331,33 @@ describe("validateSubmitDrawingPayload", () => {
     );
   });
 
+  it.each([
+    ["aucun seed", []],
+    [
+      "plusieurs seeds",
+      [
+        { x: 0.2, y: 0.2 },
+        { x: 0.8, y: 0.8 },
+      ],
+    ],
+  ])("refuse un remplissage avec %s", (_label, points) => {
+    const fill = createFill();
+    expectValidationError(
+      createPayload([{ ...fill, points } as DrawingStroke]),
+      "INVALID_DRAWING",
+    );
+  });
+
+  it("refuse une couleur de remplissage inconnue", () => {
+    const fill = createFill();
+    expectValidationError(
+      createPayload([
+        { ...fill, color: "#ABCDEF" } as DrawingStroke,
+      ]),
+      "INVALID_DRAWING",
+    );
+  });
+
   it("refuse une largeur inconnue", () => {
     const payload = createPayload();
     const invalidPayload = {
@@ -264,7 +383,7 @@ describe("validateSubmitDrawingPayload", () => {
   });
 
   it.each([
-    ["version", { version: 2 }],
+    ["version", { version: 999 }],
     ["ratio", { aspectRatio: "16:9" }],
     ["fond", { backgroundColor: "#000000" }],
   ])("refuse une constante de document incorrecte : %s", (_label, override) => {
@@ -355,5 +474,18 @@ describe("cloneDrawingDocument", () => {
     expect(clone.strokes[0]?.points[0]?.x).toBe(0.1);
     expect(clone).not.toBe(original);
     expect(clone.strokes[0]).not.toBe(original.strokes[0]);
+  });
+
+  it("clone profondément le seed d'un remplissage", () => {
+    const fill = createFill({ points: [{ x: 0.25, y: 0.75 }] });
+    const original = createDocument([fill]);
+    const clone = cloneDrawingDocument(original);
+
+    fill.points[0].x = 0.9;
+
+    expect(clone.strokes[0]).toEqual(
+      createFill({ points: [{ x: 0.25, y: 0.75 }] }),
+    );
+    expect(clone.strokes[0]?.points[0]).not.toBe(fill.points[0]);
   });
 });

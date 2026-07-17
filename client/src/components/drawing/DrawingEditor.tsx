@@ -8,6 +8,7 @@ import {
 
 import {
   DRAWING_COLOR_PALETTE,
+  DRAWING_MAX_FILL_OPERATIONS,
   DRAWING_MAX_STROKES,
   DRAWING_MAX_TOTAL_POINTS,
   type DrawingColor,
@@ -18,12 +19,14 @@ import {
 } from "@drawing-game/shared";
 
 import {
+  countDrawingFillOperations,
   countDrawingPoints,
   createDrawingDocument,
   removeLastStroke,
 } from "./drawing-document";
 import { DrawingCanvas } from "./DrawingCanvas";
 import { DrawingToolbar } from "./DrawingToolbar";
+import { GameDialog } from "../ui/GameDialog";
 import {
   clearStoredDrawingDraft,
   matchesDrawingDraftContext,
@@ -44,6 +47,7 @@ interface DrawingEditorProps {
 const DEFAULT_TOOL: DrawingTool = "pen";
 const DEFAULT_COLOR: DrawingColor = DRAWING_COLOR_PALETTE[0];
 const DEFAULT_WIDTH: DrawingStrokeWidth = 8;
+type ActiveDrawingDialog = "clear" | "submit" | null;
 
 function getInitialEditorState(context: DrawingDraftContext) {
   const draft = readStoredDrawingDraft();
@@ -93,6 +97,8 @@ export function DrawingEditor({
   );
   const [isStrokeActive, setIsStrokeActive] = useState(false);
   const [limitMessage, setLimitMessage] = useState<string | null>(null);
+  const [activeDialog, setActiveDialog] =
+    useState<ActiveDrawingDialog>(null);
   const submissionRequestedRef = useRef(false);
 
   useEffect(() => {
@@ -100,6 +106,12 @@ export function DrawingEditor({
       submissionRequestedRef.current = false;
     }
   }, [isSubmitting]);
+
+  useEffect(() => {
+    if (disabled) {
+      setActiveDialog(null);
+    }
+  }, [disabled]);
 
   useEffect(() => {
     writeStoredDrawingDraft({
@@ -129,18 +141,43 @@ export function DrawingEditor({
     0,
     DRAWING_MAX_TOTAL_POINTS - totalPointCount,
   );
+  const fillOperationCount = useMemo(
+    () => countDrawingFillOperations(strokes),
+    [strokes],
+  );
+  const remainingFillCapacity = Math.max(
+    0,
+    DRAWING_MAX_FILL_OPERATIONS - fillOperationCount,
+  );
   const canStartStroke =
     strokes.length < DRAWING_MAX_STROKES && remainingPointCapacity > 0;
   const editorIsDisabled = disabled || !canStartStroke;
 
   const handleStrokeComplete = (stroke: DrawingStroke) => {
+    if (
+      stroke.tool === "fill" &&
+      fillOperationCount >= DRAWING_MAX_FILL_OPERATIONS
+    ) {
+      setLimitMessage(
+        "La limite de remplissages est atteinte. Annulez une action pour continuer.",
+      );
+      return;
+    }
+
     setStrokes((currentStrokes) => [...currentStrokes, stroke]);
     setLimitMessage(null);
   };
 
   const handleLimitReached = () => {
+    if (selectedTool === "fill" && remainingFillCapacity === 0) {
+      setLimitMessage(
+        "La limite de remplissages est atteinte. Annulez une action pour continuer.",
+      );
+      return;
+    }
+
     setLimitMessage(
-      "La limite de complexité du dessin est atteinte. Annulez un trait pour continuer.",
+      "La limite de complexité du dessin est atteinte. Annulez une action pour continuer.",
     );
   };
 
@@ -154,12 +191,18 @@ export function DrawingEditor({
       return;
     }
 
-    if (!window.confirm("Effacer tous les traits du dessin ?")) {
+    setActiveDialog("clear");
+  };
+
+  const confirmClear = () => {
+    if (disabled) {
+      setActiveDialog(null);
       return;
     }
 
     setStrokes([]);
     setLimitMessage(null);
+    setActiveDialog(null);
   };
 
   const handleSubmit = () => {
@@ -172,19 +215,37 @@ export function DrawingEditor({
       return;
     }
 
-    if (!window.confirm("Valider définitivement ce dessin ?")) {
+    setActiveDialog("submit");
+  };
+
+  const confirmSubmit = () => {
+    if (
+      disabled ||
+      isSubmitting ||
+      submissionRequestedRef.current ||
+      strokes.length === 0
+    ) {
       return;
     }
 
     submissionRequestedRef.current = true;
-    if (!onSubmit(createDrawingDocument(strokes))) {
+    const submissionStarted = onSubmit(createDrawingDocument(strokes));
+    setActiveDialog(null);
+    if (!submissionStarted) {
       submissionRequestedRef.current = false;
     }
   };
 
   const handleColorChange = (color: DrawingColor) => {
     setSelectedColor(color);
-    setSelectedTool("pen");
+    setSelectedTool((currentTool) =>
+      currentTool === "eraser" ? "pen" : currentTool,
+    );
+  };
+
+  const handleToolChange = (tool: DrawingTool) => {
+    setSelectedTool(tool);
+    setLimitMessage(null);
   };
 
   return (
@@ -211,6 +272,7 @@ export function DrawingEditor({
             selectedColor={selectedColor}
             selectedWidth={selectedWidth}
             remainingPointCapacity={remainingPointCapacity}
+            remainingFillCapacity={remainingFillCapacity}
             disabled={editorIsDisabled}
             describedBy="drawing-canvas-help"
             onStrokeComplete={handleStrokeComplete}
@@ -229,7 +291,7 @@ export function DrawingEditor({
             <h2>Outils de dessin</h2>
           </div>
           <p>
-            {strokes.length} trait{strokes.length > 1 ? "s" : ""}
+            {strokes.length} action{strokes.length > 1 ? "s" : ""}
           </p>
         </div>
 
@@ -239,7 +301,7 @@ export function DrawingEditor({
           selectedWidth={selectedWidth}
           canUndo={strokes.length > 0}
           disabled={disabled || isStrokeActive}
-          onToolChange={setSelectedTool}
+          onToolChange={handleToolChange}
           onColorChange={handleColorChange}
           onWidthChange={setSelectedWidth}
           onUndo={handleUndo}
@@ -280,6 +342,31 @@ export function DrawingEditor({
           </p>
         )}
       </aside>
+
+      <GameDialog
+        open={activeDialog === "submit"}
+        title="Valider le dessin ?"
+        description="Après validation, votre dessin sera envoyé aux autres joueurs et vous ne pourrez plus le modifier."
+        confirmLabel="Valider mon dessin"
+        cancelLabel="Continuer à dessiner"
+        mascot={{ character: "pig", expression: "happy" }}
+        isBusy={isSubmitting || disabled}
+        onConfirm={confirmSubmit}
+        onCancel={() => setActiveDialog(null)}
+      />
+
+      <GameDialog
+        open={activeDialog === "clear"}
+        title="Tout effacer ?"
+        description="Tous les traits et remplissages de ce dessin seront supprimés."
+        confirmLabel="Tout effacer"
+        cancelLabel="Garder mon dessin"
+        mascot={{ character: "poop", expression: "confused" }}
+        tone="danger"
+        isBusy={disabled}
+        onConfirm={confirmClear}
+        onCancel={() => setActiveDialog(null)}
+      />
     </>
   );
 }

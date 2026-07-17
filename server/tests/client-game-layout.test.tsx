@@ -16,6 +16,13 @@ const GLOBAL_STYLES = readFileSync(
   new URL("../../client/src/styles/global.css", import.meta.url),
   "utf8",
 );
+const FINISHED_STYLES = readFileSync(
+  new URL(
+    "../../client/src/components/FinishedScreen.css",
+    import.meta.url,
+  ),
+  "utf8",
+);
 
 function createGame(drawerNickname = "Camille"): PublicGameState {
   return {
@@ -104,14 +111,14 @@ describe("AppLayout", () => {
     expect(GLOBAL_STYLES).toMatch(
       /\.reveal-sidebar__content\s*\{[\s\S]*?grid-auto-rows: max-content;[\s\S]*?align-content: start;/,
     );
-    expect(GLOBAL_STYLES).toMatch(
-      /\.finished-sidebar \.game-leaderboard\s*\{[\s\S]*?grid-template-rows: auto minmax\(0, 1fr\);[\s\S]*?overflow: hidden;/,
+    expect(FINISHED_STYLES).toMatch(
+      /\.finished-screen \.game-phase-layout__body\s*\{[\s\S]*?grid-template-columns: minmax\(0, 1fr\);/,
     );
-    expect(GLOBAL_STYLES).toMatch(
-      /\.finished-sidebar \.game-leaderboard__list\s*\{[\s\S]*?overflow-y: auto;/,
+    expect(FINISHED_STYLES).toMatch(
+      /@media \(min-width: 900px\)[\s\S]*?\.finished-stage\s*\{[\s\S]*?overflow-y: auto;/,
     );
-    expect(GLOBAL_STYLES).toMatch(
-      /@media \(min-width: 900px\)[\s\S]*?\.game-phase-layout__sidebar\.finished-sidebar\s*\{[\s\S]*?overflow: hidden;/,
+    expect(FINISHED_STYLES).toMatch(
+      /@media \(max-width: 360px\)[\s\S]*?grid-template-areas:\s*"first"\s*"second"\s*"third";/,
     );
   });
 

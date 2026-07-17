@@ -5,6 +5,8 @@ export {
   DRAWING_BACKGROUND_COLOR,
   DRAWING_COLOR_PALETTE,
   DRAWING_DOCUMENT_VERSION,
+  DRAWING_LEGACY_DOCUMENT_VERSION,
+  DRAWING_MAX_FILL_OPERATIONS,
   DRAWING_MAX_POINTS_PER_STROKE,
   DRAWING_MAX_STROKES,
   DRAWING_MAX_TOTAL_POINTS,
@@ -12,6 +14,9 @@ export {
 export type {
   DrawingColor,
   DrawingDocument,
+  DrawingFillOperation,
+  DrawingPathStroke,
+  DrawingPathTool,
   DrawingPoint,
   DrawingStroke,
   DrawingStrokeWidth,

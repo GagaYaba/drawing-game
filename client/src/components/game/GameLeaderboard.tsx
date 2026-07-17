@@ -33,6 +33,7 @@ export function GameLeaderboard({
           return (
             <li
               key={entry.player.id}
+              value={entry.rank}
               className={
                 isCurrentPlayer
                   ? "game-leaderboard__entry game-leaderboard__entry--current"

@@ -3,8 +3,12 @@ import { useId, useLayoutEffect, useRef } from "react";
 import type { DrawingDocument } from "@drawing-game/shared";
 
 import {
+  copyDrawingRenderCache,
+  getDrawingReferenceMetrics,
   prepareCanvasForDisplay,
   renderDrawingDocument,
+  updateDrawingRenderCache,
+  type DrawingRenderCacheState,
 } from "./drawing-renderer";
 
 interface DrawingPreviewProps {
@@ -18,6 +22,12 @@ export function DrawingPreview({
 }: DrawingPreviewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drawingRef = useRef(drawing);
+  const renderCacheRef = useRef<{
+    canvas: HTMLCanvasElement;
+    context: CanvasRenderingContext2D;
+    state: DrawingRenderCacheState | null;
+    drawing: DrawingDocument | null;
+  } | null>(null);
   const descriptionId = useId();
 
   drawingRef.current = drawing;
@@ -34,11 +44,49 @@ export function DrawingPreview({
         return;
       }
 
-      renderDrawingDocument(
+      let renderCache = renderCacheRef.current;
+      if (renderCache === null) {
+        const cacheCanvas = document.createElement("canvas");
+        const cacheContext = cacheCanvas.getContext("2d", {
+          willReadFrequently: true,
+        });
+        if (cacheContext !== null) {
+          renderCache = {
+            canvas: cacheCanvas,
+            context: cacheContext,
+            state: null,
+            drawing: null,
+          };
+          renderCacheRef.current = renderCache;
+        }
+      }
+
+      if (renderCache === null) {
+        renderDrawingDocument(
+          metrics.context,
+          drawingRef.current,
+          metrics.width,
+          metrics.height,
+        );
+        return;
+      }
+
+      const currentDrawing = drawingRef.current;
+      if (renderCache.drawing !== currentDrawing) {
+        const update = updateDrawingRenderCache(
+          renderCache.context,
+          currentDrawing,
+          getDrawingReferenceMetrics(renderCache.context),
+          renderCache.state,
+        );
+        renderCache.state = update.state;
+        renderCache.drawing = currentDrawing;
+      }
+      copyDrawingRenderCache(
         metrics.context,
-        drawingRef.current,
-        metrics.width,
-        metrics.height,
+        renderCache.canvas,
+        metrics.backingWidth,
+        metrics.backingHeight,
       );
     };
 

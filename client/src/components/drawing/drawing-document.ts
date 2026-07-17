@@ -7,6 +7,16 @@ import {
 } from "@drawing-game/shared";
 
 export function cloneDrawingStroke(stroke: DrawingStroke): DrawingStroke {
+  if (stroke.tool === "fill") {
+    const seed = stroke.points[0];
+    return {
+      tool: "fill",
+      color: stroke.color,
+      width: stroke.width,
+      points: [{ x: seed.x, y: seed.y }],
+    };
+  }
+
   return {
     tool: stroke.tool,
     color:
@@ -35,4 +45,13 @@ export function removeLastStroke(
 
 export function countDrawingPoints(strokes: readonly DrawingStroke[]): number {
   return strokes.reduce((total, stroke) => total + stroke.points.length, 0);
+}
+
+export function countDrawingFillOperations(
+  strokes: readonly DrawingStroke[],
+): number {
+  return strokes.reduce(
+    (total, stroke) => total + (stroke.tool === "fill" ? 1 : 0),
+    0,
+  );
 }

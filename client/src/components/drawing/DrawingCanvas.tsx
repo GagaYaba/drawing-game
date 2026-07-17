@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   type PointerEvent as ReactPointerEvent,
 } from "react";
@@ -10,6 +11,9 @@ import {
   DRAWING_BACKGROUND_COLOR,
   DRAWING_MAX_POINTS_PER_STROKE,
   type DrawingColor,
+  type DrawingDocument,
+  type DrawingFillOperation,
+  type DrawingPathStroke,
   type DrawingPoint,
   type DrawingStroke,
   type DrawingStrokeWidth,
@@ -22,9 +26,13 @@ import {
   shouldAddPoint,
 } from "./drawing-geometry";
 import {
+  copyDrawingRenderCache,
+  getDrawingReferenceMetrics,
   prepareCanvasForDisplay,
   renderDrawingDocument,
   renderDrawingStroke,
+  updateDrawingRenderCache,
+  type DrawingRenderCacheState,
 } from "./drawing-renderer";
 
 interface DrawingCanvasProps {
@@ -33,6 +41,7 @@ interface DrawingCanvasProps {
   selectedColor: DrawingColor;
   selectedWidth: DrawingStrokeWidth;
   remainingPointCapacity: number;
+  remainingFillCapacity: number;
   disabled: boolean;
   describedBy?: string;
   onStrokeComplete: (stroke: DrawingStroke) => void;
@@ -46,6 +55,7 @@ export function DrawingCanvas({
   selectedColor,
   selectedWidth,
   remainingPointCapacity,
+  remainingFillCapacity,
   disabled,
   describedBy,
   onStrokeComplete,
@@ -53,11 +63,35 @@ export function DrawingCanvas({
   onLimitReached,
 }: DrawingCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const strokesRef = useRef(strokes);
-  const activeStrokeRef = useRef<DrawingStroke | null>(null);
+  const drawing = useMemo(() => createDrawingDocument(strokes), [strokes]);
+  const drawingRef = useRef(drawing);
+  const activeStrokeRef = useRef<DrawingPathStroke | null>(null);
   const activePointerIdRef = useRef<number | null>(null);
+  const renderCacheRef = useRef<{
+    canvas: HTMLCanvasElement;
+    context: CanvasRenderingContext2D;
+    state: DrawingRenderCacheState | null;
+    drawing: DrawingDocument | null;
+  } | null>(null);
 
-  strokesRef.current = strokes;
+  drawingRef.current = drawing;
+
+  const getRenderCache = useCallback(() => {
+    const existingCache = renderCacheRef.current;
+    if (existingCache !== null) {
+      return existingCache;
+    }
+
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (context === null) {
+      return null;
+    }
+
+    const cache = { canvas, context, state: null, drawing: null };
+    renderCacheRef.current = cache;
+    return cache;
+  }, []);
 
   const redrawCanvas = useCallback(() => {
     const canvas = canvasRef.current;
@@ -70,12 +104,33 @@ export function DrawingCanvas({
       return;
     }
 
-    renderDrawingDocument(
-      metrics.context,
-      createDrawingDocument(strokesRef.current),
-      metrics.width,
-      metrics.height,
-    );
+    const currentDrawing = drawingRef.current;
+    const renderCache = getRenderCache();
+    if (renderCache === null) {
+      renderDrawingDocument(
+        metrics.context,
+        currentDrawing,
+        metrics.width,
+        metrics.height,
+      );
+    } else {
+      if (renderCache.drawing !== currentDrawing) {
+        const update = updateDrawingRenderCache(
+          renderCache.context,
+          currentDrawing,
+          getDrawingReferenceMetrics(renderCache.context),
+          renderCache.state,
+        );
+        renderCache.state = update.state;
+        renderCache.drawing = currentDrawing;
+      }
+      copyDrawingRenderCache(
+        metrics.context,
+        renderCache.canvas,
+        metrics.backingWidth,
+        metrics.backingHeight,
+      );
+    }
 
     const activeStroke = activeStrokeRef.current;
     if (activeStroke !== null) {
@@ -87,7 +142,7 @@ export function DrawingCanvas({
         DRAWING_BACKGROUND_COLOR,
       );
     }
-  }, []);
+  }, [getRenderCache]);
 
   useLayoutEffect(() => {
     redrawCanvas();
@@ -127,7 +182,7 @@ export function DrawingCanvas({
   }, [disabled, onStrokeActiveChange, redrawCanvas]);
 
   const drawStrokeIncrement = (
-    stroke: DrawingStroke,
+    stroke: DrawingPathStroke,
     points: DrawingPoint[],
   ) => {
     const canvas = canvasRef.current;
@@ -137,6 +192,10 @@ export function DrawingCanvas({
 
     const metrics = prepareCanvasForDisplay(canvas);
     if (metrics === null) {
+      return;
+    }
+    if (metrics.resized) {
+      redrawCanvas();
       return;
     }
 
@@ -189,7 +248,22 @@ export function DrawingCanvas({
 
     event.preventDefault();
     const point = normalizePointerPosition(event, event.currentTarget.getBoundingClientRect());
-    const stroke: DrawingStroke = {
+    if (selectedTool === "fill") {
+      if (remainingFillCapacity < 1) {
+        onLimitReached();
+        return;
+      }
+
+      onStrokeComplete({
+        tool: "fill",
+        color: selectedColor,
+        width: selectedWidth,
+        points: [{ ...point }],
+      } satisfies DrawingFillOperation);
+      return;
+    }
+
+    const stroke: DrawingPathStroke = {
       tool: selectedTool,
       color:
         selectedTool === "eraser"
@@ -262,7 +336,7 @@ export function DrawingCanvas({
     >
       <canvas
         ref={canvasRef}
-        className="drawing-canvas"
+        className={`drawing-canvas drawing-canvas--${selectedTool}`}
         aria-label="Zone de dessin interactive au format quatre tiers"
         aria-disabled={disabled}
         onPointerDown={handlePointerDown}
