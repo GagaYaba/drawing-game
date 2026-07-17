@@ -48,7 +48,7 @@ describe("RoomManager", () => {
   it("crée un salon avec un hôte et un état public sans socketId", () => {
     const manager = createTestManager();
 
-    const result = manager.createRoom("socket-host", "Romane");
+    const result = manager.createRoom("socket-host", "Pseudo");
 
     expect(result.session).toMatchObject({
       roomCode: "7KXMP",
@@ -60,7 +60,7 @@ describe("RoomManager", () => {
       players: [
         {
           id: "player-1",
-          nickname: "Romane",
+          nickname: "Pseudo",
           isHost: true,
           isReady: false,
           isConnected: true,

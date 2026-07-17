@@ -3,6 +3,12 @@ import {
   DEFAULT_RECONNECT_GRACE_MS,
   isValidReconnectGraceMs,
 } from "./sessions/reconnect-manager.js";
+import {
+  closeHttpServer,
+  closeSocketServer,
+  createGracefulShutdown,
+  installShutdownSignalHandlers,
+} from "./shutdown/graceful-shutdown.js";
 
 const DEFAULT_PORT = 3000;
 const parsedPort = Number.parseInt(process.env.PORT ?? String(DEFAULT_PORT), 10);
@@ -17,8 +23,51 @@ const reconnectGraceMs =
     ? parsedReconnectGraceMs
     : DEFAULT_RECONNECT_GRACE_MS;
 
-const { httpServer } = createDrawingGameServer({ reconnectGraceMs });
-
-httpServer.listen(port, "0.0.0.0", () => {
-  console.info(`Drawing game server listening on http://0.0.0.0:${port}`);
+const { dispose, httpServer, io } = createDrawingGameServer({
+  reconnectGraceMs,
 });
+const gracefulShutdown = createGracefulShutdown({
+  closeSocketServer: () => closeSocketServer(io),
+  closeHttpServer: () => closeHttpServer(httpServer),
+  dispose,
+  exit: (code) => {
+    process.exit(code);
+  },
+});
+const uninstallShutdownSignalHandlers = installShutdownSignalHandlers(
+  process,
+  gracefulShutdown.shutdown,
+);
+
+const handleStartupError = (error: Error): void => {
+  const errorCode =
+    "code" in error && typeof error.code === "string"
+      ? ` (${error.code})`
+      : "";
+  console.error(`[server] Startup failed${errorCode}: ${error.message}`);
+  uninstallShutdownSignalHandlers();
+  dispose();
+  process.exit(1);
+};
+
+httpServer.once("error", handleStartupError);
+
+try {
+  httpServer.listen(port, "0.0.0.0", () => {
+    httpServer.off("error", handleStartupError);
+    const address = httpServer.address();
+    const listeningPort =
+      address !== null && typeof address !== "string"
+        ? address.port
+        : port;
+    console.info(
+      `Drawing game server listening on http://0.0.0.0:${listeningPort}`,
+    );
+  });
+} catch (error) {
+  handleStartupError(
+    error instanceof Error
+      ? error
+      : new Error("Unknown server startup error."),
+  );
+}

@@ -1,5 +1,7 @@
 # Drawing Scale Game
 
+[![CI](https://github.com/GagaYaba/drawing-game/actions/workflows/ci.yml/badge.svg)](https://github.com/GagaYaba/drawing-game/actions/workflows/ci.yml)
+
 Application multijoueur de dessin en temps réel. Les joueurs créent ou rejoignent un salon, se préparent dans le lobby, puis enchaînent deux manches complètes de dessin, d'estimation et de score avant de découvrir le classement final.
 
 ## Fonctionnalités actuelles
@@ -56,8 +58,8 @@ Les commandes décrites ci-dessous s'exécutent toutes depuis la racine du dép�
 
 ## Prérequis
 
-- Node.js 22.12 ou version ultérieure ;
-- npm 10 ou version ultérieure.
+- Node.js : version indiquée dans `.node-version` ;
+- npm : version 10 ou ultérieure.
 
 Vous pouvez vérifier les versions installées avec :
 
@@ -153,6 +155,12 @@ Deux demandes de revanche successives ne peuvent pas réinitialiser le salon deu
 Pendant `ROUND_INTRO`, `DRAWING`, `VOTING`, `REVEAL` et `FINISHED`, l'interface utilise l'espace disponible comme un écran de jeu dédié et masque le header de marque global. Dans les quatre phases liées à la consigne, celle-ci reste compacte et une grande jauge occupe toute la largeur utile juste sous son énoncé. Sur ordinateur, le reste du contenu s'organise autour d'une zone principale et d'une sidebar afin de garder les informations et actions utiles visibles sans disperser l'attention.
 
 En phase `VOTING`, `GuessScale` reste dans ce header de phase, directement sous la consigne, tandis que la sidebar conserve la progression du vote, l'action de validation puis le message d'attente après confirmation. Sur mobile, la mise en page repasse en une colonne et autorise le défilement vertical lorsque le contenu dépasse la hauteur du viewport. Le canvas conserve son ratio **4:3** tout en ajustant sa taille à l'espace disponible, et l'interface de vote reste compacte pour préserver la place du dessin et de la jauge.
+
+## Direction artistique
+
+L'interface adopte un fond rose poudré et une identité ludique portée par deux mascottes déclinées en plusieurs expressions. Elles accompagnent les formulaires, les états de connexion et les différentes phases de la partie sans remplacer les libellés textuels nécessaires à l'accessibilité.
+
+Sur les jauges, le caca représente l'extrémité **1** et le cochon l'extrémité **10**. Les graduations numériques et les libellés de niveau restent toujours visibles afin que les mascottes renforcent le repère visuel sans devenir l'unique moyen de comprendre l'échelle.
 
 ## Consignes structurées et jauges de niveau
 
@@ -343,7 +351,7 @@ npm test
 
 Cette commande lance les tests Vitest : tests unitaires de la logique des salons, de la partie, du score, des estimations, du document vectoriel et de sa géométrie, ainsi que des tests d'intégration avec un serveur sur un port éphémère et de vrais clients Socket.IO.
 
-La suite actuelle contient **311 tests**. Elle couvre notamment :
+La suite actuelle contient **417 tests**. Elle couvre notamment :
 
 - les validations strictes des salons, dessins, votes, `game:start`, `game:continue` et `game:request-rematch`, ainsi que les autorisations de l'hôte et du dessinateur ;
 - la table de points des votants, le plafond de 5 points du dessinateur et l'application atomique et unique des scores ;
@@ -360,6 +368,12 @@ La suite actuelle contient **311 tests**. Elle couvre notamment :
 - la revanche complète dans le même salon, le reset des scores et statuts prêts, la nouvelle partie indépendante et l'isolation entre salons ;
 - les jauges accessibles, les écrans de dessin et de vote, le détail de `REVEAL`, le bouton de continuation et la revanche réservés à l'hôte.
 
+## Intégration continue
+
+Le workflow GitHub Actions [`ci.yml`](.github/workflows/ci.yml) s'exécute à chaque push sur `main`, pour chaque pull request et sur déclenchement manuel. Il installe les dépendances avec `npm ci`, puis exécute successivement le typecheck des trois workspaces, la suite complète de tests et le build de production.
+
+La configuration Render utilise `autoDeployTrigger: checksPass` : un déploiement automatique attend donc la réussite de cette CI avant de démarrer.
+
 ## Build et lancement en production
 
 Construisez le code partagé, le serveur TypeScript et le frontend Vite :
@@ -375,6 +389,54 @@ npm run start
 ```
 
 En production, Express sert l'API, Socket.IO et les fichiers générés du frontend depuis un même service. L'application complète est accessible sur <http://localhost:3000> avec le port par défaut.
+
+Après le build, le smoke test de production démarre le serveur compilé sur un port éphémère, vérifie l'API, le frontend, le ping/pong Socket.IO et les arrêts `SIGTERM` et `SIGINT` :
+
+```bash
+npm run smoke:production
+```
+
+## Déploiement sur Render
+
+Dans Render, créez un Blueprint à partir du dépôt contenant `render.yaml` et conservez sa branche par défaut. Le dépôt fournit toute la configuration du service ; aucune valeur `PORT`, base de données, ressource persistante ou secret supplémentaire n'est nécessaire.
+
+### Architecture
+
+Le déploiement défini dans `render.yaml` utilise un seul **Web Service Node.js**. Le frontend construit, l'API Express et Socket.IO sont servis par le même processus et le même domaine. Socket.IO ne nécessite donc ni service séparé ni URL distincte.
+
+Le service doit conserver exactement une instance tant que les salons et les parties restent en mémoire. Plusieurs instances sans stockage partagé ni routage de session pourraient exposer des états différents aux joueurs d'un même salon.
+
+### Configuration
+
+| Paramètre | Valeur |
+| --- | --- |
+| Région | Frankfurt |
+| Offre | Free |
+| Instances | `1` |
+| Build | `npm ci --include=dev && npm run build` |
+| Démarrage | `npm start` |
+| Contrôle de santé | `/api/health` |
+| Version de Node.js | `.node-version` |
+| Environnement | `NODE_ENV=production` |
+| Délai de reconnexion | `PLAYER_RECONNECT_GRACE_MS=60000` |
+
+Render fournit automatiquement la variable `PORT` en production ; elle ne doit pas être fixée dans `render.yaml`.
+
+### Limites du déploiement
+
+- les salons, joueurs et parties sont conservés uniquement dans la mémoire du processus ;
+- un redémarrage ou un redéploiement supprime les parties actives ;
+- la mise en veille possible d'une instance gratuite peut également interrompre et faire perdre une partie ;
+- la restauration de session ne fonctionne pas après un redémarrage du serveur ;
+- le service doit rester limité à une seule instance tant qu'aucun état partagé n'est disponible ;
+- l'offre gratuite convient à une démonstration ou à un prototype, pas à un service persistant ;
+- aucune base de données ni aucun autre mécanisme de persistance n'est configuré.
+
+### Arrêt gracieux
+
+Le point d'entrée du serveur intercepte `SIGTERM`, utilisé par Render pendant les redéploiements, ainsi que `SIGINT`. La procédure empêche les fermetures concurrentes, ferme Socket.IO puis le serveur HTTP et nettoie les timers de partie et de reconnexion.
+
+Un watchdog de sécurité force la fin du processus après 25 secondes si une ressource empêche l'arrêt normal, soit avant le délai maximal de 30 secondes configuré sur Render.
 
 ## Vérifier l'API
 

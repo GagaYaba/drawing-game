@@ -88,6 +88,36 @@ export function createDrawingGameServer(
     reconnectManager,
     { clock: options.reconnectManagerOptions?.clock },
   );
+  let disposed = false;
+  const dispose = (): void => {
+    if (disposed) {
+      return;
+    }
+
+    disposed = true;
+    let disposalFailed = false;
+    let firstDisposalError: unknown;
+
+    try {
+      reconnectManager.dispose();
+    } catch (error) {
+      disposalFailed = true;
+      firstDisposalError = error;
+    }
+
+    try {
+      gameManager.dispose();
+    } catch (error) {
+      if (!disposalFailed) {
+        disposalFailed = true;
+        firstDisposalError = error;
+      }
+    }
+
+    if (disposalFailed) {
+      throw firstDisposalError;
+    }
+  };
 
   app.get("/api/health", (_request, response) => {
     const health: HealthResponse = {
@@ -109,10 +139,7 @@ export function createDrawingGameServer(
     reconnectManager,
     sessionRestorationManager,
   );
-  httpServer.once("close", () => {
-    reconnectManager.dispose();
-    gameManager.dispose();
-  });
+  httpServer.once("close", dispose);
 
   if (options.serveClient !== false) {
     const currentDirectory = dirname(fileURLToPath(import.meta.url));
@@ -149,5 +176,6 @@ export function createDrawingGameServer(
     gameManager,
     reconnectManager,
     sessionRestorationManager,
+    dispose,
   };
 }

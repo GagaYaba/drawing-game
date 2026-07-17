@@ -489,7 +489,9 @@ export function registerSocketHandlers(
 
     socket.on("disconnect", (reason) => {
       const disconnection =
-        reconnectManager.markPlayerDisconnected(socket.id);
+        reason === "server shutting down"
+          ? null
+          : reconnectManager.markPlayerDisconnected(socket.id);
 
       if (disconnection !== null) {
         io.to(disconnection.roomCode).emit(

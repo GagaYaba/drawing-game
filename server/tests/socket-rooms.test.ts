@@ -352,11 +352,11 @@ describe("Socket.IO room integration", () => {
 
       expectError(await joinRoom(guest, "Bob", "ABCDE"), "ROOM_NOT_FOUND");
 
-      const creation = expectSuccess(await createRoom(host, "Romane"));
+      const creation = expectSuccess(await createRoom(host, "Pseudo"));
       expectError(
         await joinRoom(
           guest,
-          "  romane  ",
+          "  pseudo  ",
           creation.session.roomCode,
         ),
         "NICKNAME_ALREADY_USED",

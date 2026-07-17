@@ -15,10 +15,11 @@
     "start": "npm run start --workspace=@drawing-game/server",
     "pretest": "npm run build --workspace=@drawing-game/shared",
     "test": "npm run test --workspace=@drawing-game/server",
-    "typecheck": "npm run typecheck --workspace=@drawing-game/shared && npm run typecheck --workspace=@drawing-game/server && npm run typecheck --workspace=@drawing-game/client"
+    "typecheck": "npm run typecheck --workspace=@drawing-game/shared && npm run typecheck --workspace=@drawing-game/server && npm run typecheck --workspace=@drawing-game/client",
+    "smoke:production": "node scripts/production-smoke.mjs"
   },
   "engines": {
-    "node": ">=22.12.0",
+    "node": ">=22.12.0 <23.0.0",
     "npm": ">=10.0.0"
   },
   "devDependencies": {

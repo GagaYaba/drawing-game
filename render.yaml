@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: drawing-scale-game
+    runtime: node
+    plan: free
+    region: frankfurt
+    numInstances: 1
+
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+
+    healthCheckPath: /api/health
+    autoDeployTrigger: checksPass
+    maxShutdownDelaySeconds: 30
+
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+      - key: PLAYER_RECONNECT_GRACE_MS
+        value: "60000"

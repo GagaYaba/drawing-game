@@ -64,7 +64,7 @@ export function HomeScreen({
           minLength={2}
           maxLength={20}
           autoComplete="nickname"
-          placeholder="Ex. Romane"
+          placeholder="Pseudo"
           aria-describedby={errorMessage === null ? undefined : "room-form-error"}
           disabled={isPending}
         />
