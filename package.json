@@ -16,7 +16,11 @@
     "pretest": "npm run build --workspace=@drawing-game/shared",
     "test": "npm run test --workspace=@drawing-game/server",
     "typecheck": "npm run typecheck --workspace=@drawing-game/shared && npm run typecheck --workspace=@drawing-game/server && npm run typecheck --workspace=@drawing-game/client",
-    "smoke:production": "node scripts/production-smoke.mjs"
+    "smoke:production": "node scripts/production-smoke.mjs",
+    "quality:performance": "node scripts/quality-performance-check.mjs",
+    "quality:check": "node scripts/quality-check.mjs",
+    "postdeploy:check": "node scripts/post-deploy-check.mjs",
+    "check:browser": "node scripts/production-browser-check.mjs"
   },
   "engines": {
     "node": ">=22.12.0 <23.0.0",

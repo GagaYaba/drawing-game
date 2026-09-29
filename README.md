@@ -356,7 +356,7 @@ npm test
 
 Cette commande lance les tests Vitest : tests unitaires de la logique des salons, de la partie, du score, des estimations, du document vectoriel et de sa géométrie, ainsi que des tests d'intégration avec un serveur sur un port éphémère et de vrais clients Socket.IO.
 
-La suite actuelle contient **417 tests**. Elle couvre notamment :
+La suite couvre notamment :
 
 - les validations strictes des salons, dessins, votes, `game:start`, `game:continue` et `game:request-rematch`, ainsi que les autorisations de l'hôte et du dessinateur ;
 - la table de points des votants, le plafond de 5 points du dessinateur et l'application atomique et unique des scores ;
@@ -375,9 +375,19 @@ La suite actuelle contient **417 tests**. Elle couvre notamment :
 
 ## Intégration continue
 
-Le workflow GitHub Actions [`ci.yml`](.github/workflows/ci.yml) s'exécute à chaque push sur `main`, pour chaque pull request et sur déclenchement manuel. Il installe les dépendances avec `npm ci`, puis exécute successivement le typecheck des trois workspaces, la suite complète de tests et le build de production.
+Le protocole détaillé des quatre environnements, de la livraison, du rollback et des seuils mesurables est documenté dans [C.2.1.1 — Environnements, déploiement continu, qualité et performance](docs/c2-1-1-environnements-deploiement-qualite-performance.md).
 
-La configuration Render utilise `autoDeployTrigger: checksPass` : un déploiement automatique attend donc la réussite de cette CI avant de démarrer.
+La porte unique locale et CI exécute le typecheck, tous les tests, le build, le smoke test compilé, puis les budgets de performance et de taille :
+
+```bash
+npm run quality:check
+```
+
+Avant tout autre contrôle, l'orchestrateur affiche la version Node détectée, lit la version exacte attendue dans `.node-version` et la plage déclarée dans `engines.node`, puis refuse immédiatement un runtime différent. Cela garantit que les mesures locales et CI utilisent la version de `.node-version` sans la dupliquer dans le script.
+
+Elle produit `reports/c2-1-1/quality-performance-report.json`; ce dossier généré est ignoré par Git. Le workflow GitHub Actions [`ci.yml`](.github/workflows/ci.yml) s'exécute sur les pull requests, les pushes vers `main` et manuellement. Après `npm ci`, il appelle exactement cette même commande et conserve le rapport comme artefact, y compris autant que possible en cas d'échec.
+
+La configuration Render cible `main` et utilise `autoDeployTrigger: checksPass` : les checks réussis autorisent son déploiement automatique; un échec de la porte bloque ce chemin de livraison.
 
 ## Build et lancement en production
 
@@ -401,9 +411,23 @@ Après le build, le smoke test de production démarre le serveur compilé sur un
 npm run smoke:production
 ```
 
+Après un déploiement, contrôlez sans créer de salon la santé, le frontend et un échange Socket.IO. L'URL peut aussi être fournie avec `POST_DEPLOY_CHECK_URL` :
+
+```bash
+npm run postdeploy:check -- --url https://drawing-scale-game.onrender.com
+```
+
+Le parcours navigateur plus large est optionnel, requiert un serveur compilé déjà lancé ainsi que Chrome, Chromium ou Edge, et crée réellement des salons :
+
+```bash
+npm run check:browser -- --url http://127.0.0.1:3000
+```
+
+Il n'est pas inclus dans la porte CI afin de ne pas la rendre dépendante d'une installation Chromium.
+
 ## Déploiement sur Render
 
-Dans Render, créez un Blueprint à partir du dépôt contenant `render.yaml` et conservez sa branche par défaut. Le dépôt fournit toute la configuration du service ; aucune valeur `PORT`, base de données, ressource persistante ou secret supplémentaire n'est nécessaire.
+Dans Render, créez un Blueprint à partir du dépôt contenant `render.yaml`; le service y cible explicitement la branche `main`. Le dépôt fournit toute la configuration du service ; aucune valeur `PORT`, base de données, ressource persistante ou secret supplémentaire n'est nécessaire.
 
 ### Architecture
 
@@ -418,6 +442,7 @@ Le service doit conserver exactement une instance tant que les salons et les par
 | Région | Frankfurt |
 | Offre | Free |
 | Instances | `1` |
+| Branche | `main` |
 | Build | `npm ci --include=dev && npm run build` |
 | Démarrage | `npm start` |
 | Contrôle de santé | `/api/health` |

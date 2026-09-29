@@ -33,11 +33,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Typecheck
-        run: npm run typecheck
+      - name: Quality, performance and production gate
+        run: npm run quality:check
 
-      - name: Test
-        run: npm test
-
-      - name: Build
-        run: npm run build
+      - name: Upload C.2.1.1 quality report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: c2-1-1-quality-performance-report
+          path: reports/c2-1-1/quality-performance-report.json
+          if-no-files-found: warn
+          retention-days: 14

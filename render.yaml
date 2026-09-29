@@ -5,6 +5,7 @@ services:
     plan: free
     region: frankfurt
     numInstances: 1
+    branch: main
 
     buildCommand: npm ci --include=dev && npm run build
     startCommand: npm start
