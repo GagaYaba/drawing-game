@@ -115,11 +115,14 @@ Tout code de sortie non nul de la porte fait échouer le job. Le rapport ne remp
 | Version d'exécution | [`.node-version`](../.node-version) et `engines.node` de [`package.json`](../package.json) | Présent dans le dépôt. |
 | Installation reproductible | `npm ci` dans le workflow et [`package-lock.json`](../package-lock.json) | Présent dans le dépôt. |
 | Porte de contrôle | Script `quality:check` de [`package.json`](../package.json) et [`scripts/quality-check.mjs`](../scripts/quality-check.mjs) | Présent dans le dépôt. |
-| Première exécution verte connue | [GitHub Actions — run 36559191291](https://github.com/GagaYaba/drawing-game/actions/runs/36559191291) | URL fournie et à conserver comme preuve distante. |
+| Première exécution verte connue | [GitHub Actions — run 36559191291](https://github.com/GagaYaba/drawing-game/actions/runs/36559191291) | Preuve historique conservée. |
 | Préparation des pull requests | [`.github/pull_request_template.md`](../.github/pull_request_template.md) | Présent dans le dépôt. |
-| Pull request C2.1.2 | URL de la future pull request | À obtenir après un futur push; aucune PR n'est créée par cette intervention. |
-| Validation après fusion | URL de l'exécution déclenchée par le futur push de fusion sur `main` | À obtenir après fusion. |
-| Rapport détaillé | Artefact `c2-1-1-quality-performance-report` de GitHub Actions | Configuré; présence à vérifier dans chaque exécution utilisée comme preuve. |
+| Commit source C2.1.2 | [`ceac66b81fb65efd543c2358bc32bde31f11dc83`](https://github.com/GagaYaba/drawing-game/commit/ceac66b81fb65efd543c2358bc32bde31f11dc83) | Intégré. |
+| Pull request C2.1.2 | [Pull request fusionnée nº 1](https://github.com/GagaYaba/drawing-game/pull/1) | Fusionnée dans `main`. |
+| CI de la pull request | [GitHub Actions — run 36568233127](https://github.com/GagaYaba/drawing-game/actions/runs/36568233127) | Réussie; artefact `c2-1-1-quality-performance-report` présent. |
+| Commit de fusion | [`fd73e3ccd1f4eadca019d48dfebf01812b2a86e6`](https://github.com/GagaYaba/drawing-game/commit/fd73e3ccd1f4eadca019d48dfebf01812b2a86e6) | Présent dans `main`. |
+| Validation après fusion | [GitHub Actions — run 36568935892](https://github.com/GagaYaba/drawing-game/actions/runs/36568935892) | Réussie sur `main`; artefact `c2-1-1-quality-performance-report` présent. |
+| Rapport détaillé | Artefact `c2-1-1-quality-performance-report` de GitHub Actions | Présent sur les exécutions de pull request et d'après-fusion ci-dessus. |
 
 ## Configuration GitHub recommandée
 

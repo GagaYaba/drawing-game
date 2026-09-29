@@ -2,7 +2,7 @@
 
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import {
@@ -10,9 +10,11 @@ import {
   dirname,
   isAbsolute,
   join,
+  relative,
   resolve,
 } from "node:path";
 import process from "node:process";
+import { pathToFileURL } from "node:url";
 
 const DEFAULT_BASE_URL = "http://127.0.0.1:3000";
 const DEFAULT_TIMEOUT_MS = 20_000;
@@ -25,21 +27,83 @@ const CLIENT_INSTANCE_STORAGE_KEY =
 const PLAYER_SESSION_STORAGE_KEY = "drawing-scale-game-session";
 const SECOND_TAB_ERROR =
   "Cette session est déjà ouverte dans un autre onglet.";
-const VIEWPORTS = [
-  { width: 1366, height: 768 },
-  { width: 1440, height: 900 },
-  { width: 1920, height: 1080 },
-  { width: 320, height: 568 },
-  { width: 375, height: 667 },
-  { width: 390, height: 844 },
+const DESKTOP_VIEWPORT = {
+  name: "desktop-standard",
+  equipment: "computer",
+  orientation: "landscape",
+  width: 1440,
+  height: 900,
+};
+const TABLET_PORTRAIT_VIEWPORT = {
+  name: "tablet-portrait",
+  equipment: "tablet",
+  orientation: "portrait",
+  width: 768,
+  height: 1024,
+};
+const TABLET_LANDSCAPE_VIEWPORT = {
+  name: "tablet-landscape",
+  equipment: "tablet",
+  orientation: "landscape",
+  width: 1024,
+  height: 768,
+};
+export const PRODUCTION_BROWSER_VIEWPORTS = [
+  {
+    name: "desktop-compact",
+    equipment: "computer",
+    orientation: "landscape",
+    width: 1366,
+    height: 768,
+  },
+  DESKTOP_VIEWPORT,
+  {
+    name: "desktop-wide",
+    equipment: "computer",
+    orientation: "landscape",
+    width: 1920,
+    height: 1080,
+  },
+  TABLET_PORTRAIT_VIEWPORT,
+  TABLET_LANDSCAPE_VIEWPORT,
+  {
+    name: "phone-compact",
+    equipment: "phone",
+    orientation: "portrait",
+    width: 320,
+    height: 568,
+  },
+  {
+    name: "phone-standard",
+    equipment: "phone",
+    orientation: "portrait",
+    width: 375,
+    height: 667,
+  },
+  {
+    name: "phone-tall",
+    equipment: "phone",
+    orientation: "portrait",
+    width: 390,
+    height: 844,
+  },
 ];
-const PROMPT_HEADER_VIEWPORTS = [
-  { width: 1366, height: 768 },
-  { width: 1440, height: 900 },
-  { width: 390, height: 844 },
-  { width: 320, height: 568 },
+const VIEWPORTS = PRODUCTION_BROWSER_VIEWPORTS;
+const TABLET_VIEWPORTS = [
+  TABLET_PORTRAIT_VIEWPORT,
+  TABLET_LANDSCAPE_VIEWPORT,
 ];
-const DESKTOP_VIEWPORT = VIEWPORTS[1];
+const PROMPT_HEADER_VIEWPORT_NAMES = new Set([
+  "desktop-compact",
+  "desktop-standard",
+  "tablet-portrait",
+  "tablet-landscape",
+  "phone-compact",
+  "phone-tall",
+]);
+const PROMPT_HEADER_VIEWPORTS = VIEWPORTS.filter((viewport) =>
+  PROMPT_HEADER_VIEWPORT_NAMES.has(viewport.name)
+);
 const DIALOG_SELECTOR = ".game-dialog-card[role='dialog']";
 const UUID_V4_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -52,12 +116,15 @@ Options:
   --url <url>         Production server URL (default: ${DEFAULT_BASE_URL})
   --chrome <path>     Chrome/Chromium/Edge executable
   --timeout <ms>      Per-step timeout (default: ${DEFAULT_TIMEOUT_MS})
+  --screenshot-dir <path>
+                       Persist screenshots in this directory
   --headful           Show the browser window instead of using headless mode
   --no-sandbox        Pass --no-sandbox to Chromium (only when required)
   --help              Show this help
 
 Environment equivalents:
-  PRODUCTION_BROWSER_CHECK_URL, CHROME_PATH
+  PRODUCTION_BROWSER_CHECK_URL, CHROME_PATH,
+  PRODUCTION_BROWSER_SCREENSHOT_DIR
 
 The production build/server must already be running at --url.`);
 }
@@ -70,6 +137,8 @@ function parseArguments(argumentsReceived) {
     timeoutMs: DEFAULT_TIMEOUT_MS,
     headless: true,
     noSandbox: false,
+    screenshotDirectory:
+      process.env.PRODUCTION_BROWSER_SCREENSHOT_DIR ?? null,
     help: false,
   };
 
@@ -96,6 +165,12 @@ function parseArguments(argumentsReceived) {
       options.timeoutMs = Number(nextValue());
     } else if (argument.startsWith("--timeout=")) {
       options.timeoutMs = Number(argument.slice("--timeout=".length));
+    } else if (argument === "--screenshot-dir") {
+      options.screenshotDirectory = nextValue();
+    } else if (argument.startsWith("--screenshot-dir=")) {
+      options.screenshotDirectory = argument.slice(
+        "--screenshot-dir=".length,
+      );
     } else if (argument === "--headful") {
       options.headless = false;
     } else if (argument === "--no-sandbox") {
@@ -122,6 +197,9 @@ function parseArguments(argumentsReceived) {
   parsedUrl.hash = "";
   parsedUrl.search = "";
   options.baseUrl = parsedUrl.href.replace(/\/$/u, "");
+  if (options.screenshotDirectory !== null) {
+    options.screenshotDirectory = resolve(options.screenshotDirectory);
+  }
 
   return options;
 }
@@ -1312,6 +1390,137 @@ class BrowserPage {
     );
   }
 
+  async inspectResponsiveSurface({
+    viewport,
+    surfaceName,
+    rootSelector,
+    requiredSelectors = [],
+    requiredButtonSelectors = [],
+  }) {
+    await this.setViewport(viewport);
+    await this.waitForSelector(rootSelector, `${surfaceName} root`);
+    const result = await this.evaluate(`(async () => {
+      const rootSelector = ${JSON.stringify(rootSelector)};
+      const requiredSelectors = ${JSON.stringify(requiredSelectors)};
+      const requiredButtonSelectors = ${JSON.stringify(requiredButtonSelectors)};
+      const root = document.querySelector(rootSelector);
+      if (!(root instanceof HTMLElement)) {
+        return { present: false };
+      }
+      const waitForLayout = () =>
+        new Promise((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(resolve)),
+        );
+      const inspectElement = async (selector, mustBeEnabledButton) => {
+        const element = document.querySelector(selector);
+        if (!(element instanceof HTMLElement)) {
+          return { selector, present: false };
+        }
+        element.scrollIntoView({
+          block: "center",
+          inline: "nearest",
+          behavior: "instant",
+        });
+        await waitForLayout();
+        const rect = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        const epsilon = 1;
+        return {
+          selector,
+          present: true,
+          visible:
+            rect.width > 0 &&
+            rect.height > 0 &&
+            style.display !== "none" &&
+            style.visibility !== "hidden",
+          horizontallyContained:
+            rect.left >= -epsilon &&
+            rect.right <= window.innerWidth + epsilon,
+          verticallyReachable:
+            rect.top >= -epsilon &&
+            rect.bottom <= window.innerHeight + epsilon,
+          enabled:
+            !mustBeEnabledButton ||
+            (element instanceof HTMLButtonElement && !element.disabled),
+          width: rect.width,
+          height: rect.height,
+        };
+      };
+
+      window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+      await waitForLayout();
+      const rootRect = root.getBoundingClientRect();
+      const elements = [];
+      for (const selector of requiredSelectors) {
+        elements.push(await inspectElement(selector, false));
+      }
+      const buttons = [];
+      for (const selector of requiredButtonSelectors) {
+        buttons.push(await inspectElement(selector, true));
+      }
+      window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+      await waitForLayout();
+      const epsilon = 1;
+      return {
+        present: true,
+        rootVisible: rootRect.width > 0 && rootRect.height > 0,
+        rootHorizontallyContained:
+          rootRect.left >= -epsilon &&
+          rootRect.right <= window.innerWidth + epsilon,
+        noHorizontalOverflow:
+          document.documentElement.scrollWidth <= window.innerWidth + epsilon &&
+          document.body.scrollWidth <= window.innerWidth + epsilon,
+        elements,
+        buttons,
+      };
+    })()`);
+
+    const viewportDescription =
+      `${viewport.name} (${viewport.width}x${viewport.height})`;
+    assertCondition(
+      result?.present === true &&
+        result.rootVisible &&
+        result.rootHorizontallyContained,
+      `${surfaceName} is missing or escapes ${viewportDescription}.`,
+    );
+    assertCondition(
+      result.noHorizontalOverflow,
+      `${surfaceName} causes horizontal overflow at ${viewportDescription}.`,
+    );
+    assertCondition(
+      result.elements.every(
+        (element) =>
+          element.present &&
+          element.visible &&
+          element.horizontallyContained,
+      ),
+      `${surfaceName} hides required content at ${viewportDescription}.`,
+    );
+    assertCondition(
+      result.buttons.every(
+        (button) =>
+          button.present &&
+          button.visible &&
+          button.horizontallyContained &&
+          button.verticallyReachable &&
+          button.enabled,
+      ),
+      `${surfaceName} makes a primary command inaccessible at ${viewportDescription}.`,
+    );
+
+    return {
+      surface: surfaceName,
+      viewport: {
+        name: viewport.name,
+        width: viewport.width,
+        height: viewport.height,
+      },
+      requiredContent: requiredSelectors,
+      requiredButtons: requiredButtonSelectors,
+      noHorizontalOverflow: true,
+    };
+  }
+
   async inspectWaitingLayout(viewport) {
     await this.setViewport(viewport);
     await this.waitForSelector(
@@ -1996,6 +2205,7 @@ class BrowserPage {
       const retryButton = document.querySelector(
         ".connection-recovery-retry",
       );
+      const retryRect = retryButton?.getBoundingClientRect();
 
       return {
         present: true,
@@ -2023,6 +2233,14 @@ class BrowserPage {
               disabled: retryButton.disabled,
               ariaBusy: retryButton.getAttribute("aria-busy"),
               text: retryButton.textContent?.replace(/\\s+/gu, " ").trim() ?? "",
+              width: retryRect?.width ?? 0,
+              height: retryRect?.height ?? 0,
+              viewportContained:
+                retryRect !== undefined &&
+                retryRect.left >= -epsilon &&
+                retryRect.top >= -epsilon &&
+                retryRect.right <= window.innerWidth + epsilon &&
+                retryRect.bottom <= window.innerHeight + epsilon,
             }
           : null,
       };
@@ -2047,6 +2265,16 @@ class BrowserPage {
     assertCondition(
       result.noHorizontalOverflow,
       `The recovery overlay causes horizontal overflow at ${viewport.width}x${viewport.height}.`,
+    );
+    assertCondition(
+      result.retry !== null &&
+        result.retry.disabled === false &&
+        result.retry.ariaBusy === "false" &&
+        result.retry.text.length > 0 &&
+        result.retry.width > 0 &&
+        result.retry.height > 0 &&
+        result.retry.viewportContained,
+      `The recovery retry action is inaccessible at ${viewport.width}x${viewport.height}.`,
     );
     assertCondition(
       Math.abs(result.tile.width - 44) <= 1 &&
@@ -2082,6 +2310,7 @@ class BrowserPage {
       mascot: `${Math.round(result.mascot.width)}x${Math.round(
         result.mascot.height,
       )}`,
+      retryAccessible: true,
     };
   }
 
@@ -2525,22 +2754,86 @@ async function exerciseDetailedDrawingTurn({
     [0.8, 0.7],
   ]);
 
-  await drawerPage.clickAccessibleButton("Valider le dessin");
-  const submitDialogCheck = await drawerPage.inspectDialog({
-    title: "Valider le dessin ?",
-    confirmLabel: "Valider mon dessin",
-    cancelLabel: "Continuer \u00e0 dessiner",
-  });
-  await drawerPage.pressKey("Escape");
-  await drawerPage.waitForNoSelector(
-    DIALOG_SELECTOR,
-    "drawing submission dialog after Escape",
-  );
-  assertCondition(
-    phaseObserver.latestRoomState?.game?.phase === "DRAWING",
-    "Pressing Escape in the drawing dialog changed the game phase.",
-  );
+  const drawingSubmissionAccessChecks = [];
+  for (const viewport of VIEWPORTS) {
+    drawingSubmissionAccessChecks.push(
+      await drawerPage.inspectResponsiveSurface({
+        viewport,
+        surfaceName: "drawing editor and toolbar",
+        rootSelector: ".drawing-screen",
+        requiredSelectors: [
+          ".drawing-canvas",
+          ".drawing-toolbar",
+          ".drawing-submit-area",
+        ],
+        requiredButtonSelectors: [
+          "button[aria-label='Stylo']",
+          "button[aria-label='Gomme']",
+          "button[aria-label='Pot de peinture']",
+          "button[aria-label='Annuler']",
+          "button[aria-label='Tout effacer']",
+          ".drawing-submit-button",
+          ".drawing-editor-controls .game-sidebar-leave button",
+        ],
+      }),
+    );
+  }
 
+  await drawerPage.clickAccessibleButton("Valider le dessin");
+  const submitDialogChecks = [];
+  for (const viewport of VIEWPORTS) {
+    await drawerPage.setViewport(viewport);
+    submitDialogChecks.push({
+      viewport: {
+        name: viewport.name,
+        width: viewport.width,
+        height: viewport.height,
+      },
+      ...(await drawerPage.inspectDialog({
+        title: "Valider le dessin ?",
+        confirmLabel: "Valider mon dessin",
+        cancelLabel: "Continuer \u00e0 dessiner",
+      })),
+    });
+  }
+
+  const keyboardDialogClosures = [];
+  for (const [index, viewport] of TABLET_VIEWPORTS.entries()) {
+    if (index > 0) {
+      await drawerPage.clickAccessibleButton("Valider le dessin");
+    }
+    await drawerPage.setViewport(viewport);
+    await drawerPage.inspectDialog({
+      title: "Valider le dessin ?",
+      confirmLabel: "Valider mon dessin",
+      cancelLabel: "Continuer \u00e0 dessiner",
+    });
+    await drawerPage.pressKey("Escape");
+    await drawerPage.waitForNoSelector(
+      DIALOG_SELECTOR,
+      `drawing submission dialog after Escape at ${viewport.name}`,
+    );
+    const focusRestored = await drawerPage.evaluate(`(() =>
+      document.activeElement instanceof HTMLButtonElement &&
+      document.activeElement.classList.contains("drawing-submit-button")
+    )()`);
+    assertCondition(
+      phaseObserver.latestRoomState?.game?.phase === "DRAWING" &&
+        focusRestored === true,
+      `Pressing Escape in the drawing dialog changed the phase or lost focus at ${viewport.name}.`,
+    );
+    keyboardDialogClosures.push({
+      viewport: {
+        name: viewport.name,
+        width: viewport.width,
+        height: viewport.height,
+      },
+      closedWithEscape: true,
+      triggerFocusRestored: true,
+    });
+  }
+
+  await drawerPage.setViewport(DESKTOP_VIEWPORT);
   await drawerPage.clickAccessibleButton("Valider le dessin");
   await drawerPage.inspectDialog({
     title: "Valider le dessin ?",
@@ -2559,7 +2852,12 @@ async function exerciseDetailedDrawingTurn({
     sampleAfterUndo,
     clearDialogChecks,
     clearResult,
-    submitDialogCheck,
+    drawingSubmissionAccessChecks,
+    submitDialogCheck: submitDialogChecks.find(
+      ({ viewport }) => viewport.name === DESKTOP_VIEWPORT.name,
+    ),
+    submitDialogChecks,
+    keyboardDialogClosures,
     clearDialogScreenshot,
   };
 }
@@ -2599,6 +2897,7 @@ async function submitTurnGuesses({
   );
   let cancellationTested = false;
   let guessDialogCheck = null;
+  let guessDialogResponsiveChecks = null;
 
   for (const [voterIndex, voter] of voters.entries()) {
     const voterPage = pagesByPlayerId.get(voter.id);
@@ -2631,6 +2930,24 @@ async function submitTurnGuesses({
     guessDialogCheck ??= currentDialogCheck;
 
     if (shouldTestCancellation && !cancellationTested) {
+      guessDialogResponsiveChecks = [];
+      for (const viewport of VIEWPORTS) {
+        await voterPage.setViewport(viewport);
+        guessDialogResponsiveChecks.push({
+          viewport: {
+            name: viewport.name,
+            width: viewport.width,
+            height: viewport.height,
+          },
+          ...(await voterPage.inspectDialog({
+            title: "Valider votre estimation ?",
+            confirmLabel: "Valider mon estimation",
+            cancelLabel: "Modifier mon choix",
+            valueLabel,
+          })),
+        });
+      }
+      await voterPage.setViewport(DESKTOP_VIEWPORT);
       await voterPage.clickAccessibleButton(
         "Modifier mon choix",
         DIALOG_SELECTOR,
@@ -2683,6 +3000,7 @@ async function submitTurnGuesses({
   return {
     cancellationTested,
     guessDialogCheck,
+    guessDialogResponsiveChecks,
   };
 }
 
@@ -2719,9 +3037,12 @@ async function runUiScenario({
   const screenshotPaths = [];
   const drawingVisualChecks = [];
   const promptHeaderVisualChecks = [];
+  const votingVisualChecks = [];
+  const revealVisualChecks = [];
   const completedTurnIds = new Set();
   let detailedDrawingCheck = null;
   let guessDialogCheck = null;
+  let guessDialogResponsiveChecks = null;
   let guessCancellationTested = false;
 
   for (
@@ -2770,6 +3091,19 @@ async function runUiScenario({
         const waiting = await observerPage.inspectWaitingLayout(
           viewport,
         );
+        const waitingAccess =
+          await observerPage.inspectResponsiveSurface({
+            viewport,
+            surfaceName: "drawing waiting screen",
+            rootSelector: ".drawing-screen",
+            requiredSelectors: [
+              ".drawing-observer-stage",
+              ".game-sidebar-card--waiting",
+            ],
+            requiredButtonSelectors: [
+              ".game-sidebar-leave button",
+            ],
+          });
         const editor = await drawerPage.inspectDrawingLayout(viewport);
         assertCondition(
           Math.abs(waiting.width - editor.width) <= 2 &&
@@ -2781,6 +3115,7 @@ async function runUiScenario({
         drawingVisualChecks.push({
           viewport: waiting.viewport,
           waiting,
+          waitingAccess,
           editor,
         });
       }
@@ -2815,6 +3150,39 @@ async function runUiScenario({
       turnNumber,
       `voting phase for turn ${turnNumber}`,
     );
+    if (turnNumber === 1) {
+      await observerPage.setViewport(DESKTOP_VIEWPORT);
+      await observerPage.waitForSelector(
+        ".voting-screen",
+        "voting screen for prototype evidence",
+      );
+      screenshotPaths.push(
+        await observerPage.captureScreenshot(
+          join(screenshotDirectory, "voting.png"),
+        ),
+      );
+      await observerPage.clickAccessibleButton("Choisir 5 sur 10");
+      for (const viewport of VIEWPORTS) {
+        votingVisualChecks.push(
+          await observerPage.inspectResponsiveSurface({
+            viewport,
+            surfaceName: "voting screen",
+            rootSelector: ".voting-screen",
+            requiredSelectors: [
+              ".game-media-viewport",
+              ".guess-scale",
+              ".vote-progress",
+              ".guess-submit-panel",
+            ],
+            requiredButtonSelectors: [
+              "button[aria-label='Choisir 5 sur 10']",
+              ".guess-submit-button",
+              ".voting-sidebar .game-sidebar-leave button",
+            ],
+          }),
+        );
+      }
+    }
     const voteCheck = await submitTurnGuesses({
       phaseObserver: hostPage,
       pagesByPlayerId,
@@ -2824,6 +3192,8 @@ async function runUiScenario({
     });
     guessCancellationTested ||= voteCheck.cancellationTested;
     guessDialogCheck ??= voteCheck.guessDialogCheck;
+    guessDialogResponsiveChecks ??=
+      voteCheck.guessDialogResponsiveChecks;
 
     await waitForPhaseAcrossClients(
       pages,
@@ -2831,6 +3201,28 @@ async function runUiScenario({
       turnNumber,
       `reveal phase for turn ${turnNumber}`,
     );
+    if (turnNumber === 1) {
+      for (const viewport of VIEWPORTS) {
+        revealVisualChecks.push(
+          await hostPage.inspectResponsiveSurface({
+            viewport,
+            surfaceName: "reveal and leaderboard screen",
+            rootSelector: ".reveal-screen",
+            requiredSelectors: [
+              ".game-media-viewport",
+              ".reveal-drawer-result",
+              ".reveal-result-list",
+              ".game-leaderboard",
+              ".reveal-continuation",
+            ],
+            requiredButtonSelectors: [
+              ".reveal-continue-button",
+              ".reveal-sidebar .game-sidebar-leave button",
+            ],
+          }),
+        );
+      }
+    }
     await hostPage.setViewport(DESKTOP_VIEWPORT);
     await hostPage.waitForSelector(
       ".reveal-continue-button",
@@ -2862,12 +3254,28 @@ async function runUiScenario({
     "The final state does not report all six completed turns.",
   );
   const finishedVisualChecks = [];
+  const finishedAccessChecks = [];
   for (const viewport of VIEWPORTS) {
     finishedVisualChecks.push(
       await hostPage.inspectFinishedLayout(
         viewport,
         finished.leaderboard,
       ),
+    );
+    finishedAccessChecks.push(
+      await hostPage.inspectResponsiveSurface({
+        viewport,
+        surfaceName: "finished screen",
+        rootSelector: ".finished-screen",
+        requiredSelectors: [
+          ".finished-podium",
+          ".finished-actions",
+        ],
+        requiredButtonSelectors: [
+          ".finished-rematch-button",
+          ".finished-actions .game-sidebar-leave button",
+        ],
+      }),
     );
   }
   await hostPage.setViewport(DESKTOP_VIEWPORT);
@@ -2933,13 +3341,20 @@ async function runUiScenario({
     nativeConfirmCalls,
     drawingVisualChecks,
     promptHeaderVisualChecks,
+    votingVisualChecks,
+    revealVisualChecks,
     detailedDrawingCheck,
     guessDialogCheck,
+    guessDialogResponsiveChecks,
     guessCancellationTested,
     finishedVisualChecks,
+    finishedAccessChecks,
     finalLeaderboard: finished.leaderboard,
     screenshotDirectory,
     screenshotPaths,
+    screenshotFiles: screenshotPaths.map((path) =>
+      relative(screenshotDirectory, path).replaceAll("\\", "/")
+    ),
   };
 }
 
@@ -2947,6 +3362,7 @@ async function runBrowserScenario(
   controller,
   baseUrl,
   promptHeaderCases,
+  requestedScreenshotDirectory,
 ) {
   controller.baseUrl = baseUrl;
   const hostContext = await controller.createContext();
@@ -2989,6 +3405,30 @@ async function runBrowserScenario(
   await setPlayerReady(guestOne, host, "GuestOneCheck");
   await setPlayerReady(guestTwo, host, "GuestTwoCheck");
   await host.waitForButton("Lancer la partie", true);
+  const lobbyVisualChecks = [];
+  for (const viewport of VIEWPORTS) {
+    lobbyVisualChecks.push(
+      await host.inspectResponsiveSurface({
+        viewport,
+        surfaceName: "lobby and player list",
+        rootSelector: ".lobby",
+        requiredSelectors: [
+          ".room-code-block",
+          ".player-list",
+          ".readiness-card",
+          ".lobby-actions",
+        ],
+        requiredButtonSelectors: [
+          ".copy-actions button:nth-of-type(1)",
+          ".copy-actions button:nth-of-type(2)",
+          ".lobby-primary-actions button:nth-of-type(1)",
+          ".lobby-primary-actions button:nth-of-type(2)",
+          ".lobby-actions > button.button--danger-ghost",
+        ],
+      }),
+    );
+  }
+  await host.setViewport(DESKTOP_VIEWPORT);
   await host.clickButton("Lancer la partie");
   const beforeReload = structuredClone(
     await host.waitForRoomState(
@@ -3110,7 +3550,7 @@ async function runBrowserScenario(
     "real host disconnection before second-tab retry",
   );
 
-  await secondTab.setViewport(VIEWPORTS[1]);
+  await secondTab.setViewport(DESKTOP_VIEWPORT);
   await secondTab.setNetworkLatency(350);
   guestOne.latestRoomState = null;
   const loadingState =
@@ -3172,9 +3612,10 @@ async function runBrowserScenario(
     [guestOnePlayerId, guestOne],
     [guestTwoPlayerId, guestTwo],
   ]);
-  const screenshotDirectory = await mkdtemp(
-    join(tmpdir(), "drawing-game-ui-check-"),
-  );
+  const screenshotDirectory =
+    requestedScreenshotDirectory ??
+    await mkdtemp(join(tmpdir(), "drawing-game-ui-check-"));
+  await mkdir(screenshotDirectory, { recursive: true });
   const uiChecks = await runUiScenario({
     hostPage: secondTab,
     pagesByPlayerId,
@@ -3192,18 +3633,34 @@ async function runBrowserScenario(
     realSecondTabRefused: true,
     manualRetryRestored: true,
     loadingStateObserved: loadingState.loading === true,
+    browserClientCount: 3,
+    verifiedViewports: VIEWPORTS.map((viewport) => ({ ...viewport })),
+    phasesVisited: [
+      "LOBBY",
+      "ROUND_INTRO",
+      "DRAWING",
+      "VOTING",
+      "REVEAL",
+      "FINISHED",
+    ],
+    responsiveSurfacesVerified: [
+      "lobby and player list",
+      "connection recovery",
+      "drawing waiting stage",
+      "drawing editor and toolbar",
+      "drawing confirmation dialogs",
+      "voting screen and controls",
+      "voting confirmation dialog",
+      "reveal and leaderboard screen",
+      "finished screen and actions",
+    ],
+    lobbyVisualChecks,
     visualChecks,
     uiChecks,
   };
 }
 
-async function main() {
-  const options = parseArguments(process.argv.slice(2));
-  if (options.help) {
-    showHelp();
-    return;
-  }
-
+export async function runProductionBrowserCheck(options) {
   const promptHeaderCases = await loadPromptHeaderCases();
   await verifyHealth(options.baseUrl, options.timeoutMs);
   const chrome = await launchChrome(options);
@@ -3217,34 +3674,53 @@ async function main() {
       controller,
       options.baseUrl,
       promptHeaderCases,
+      options.screenshotDirectory,
     );
     await verifyHealth(options.baseUrl, options.timeoutMs);
-    console.info(
-      `Production browser check passed with ${chrome.chromePath}.`,
-    );
-    console.info(
-      JSON.stringify(
-        {
-          ...result,
-          socketIoVerifiedBy:
-            "three real browser clients and room:state WebSocket frames",
-          health: "ok",
-        },
-        null,
-        2,
-      ),
-    );
+    return {
+      ...result,
+      socketIoVerifiedBy:
+        "three real browser clients and room:state WebSocket frames",
+      health: "ok",
+      browserExecutable: chrome.chromePath,
+    };
   } finally {
     await controller.dispose();
     await chrome.cleanup();
   }
 }
 
-try {
-  await main();
-} catch (error) {
-  console.error(
-    `Production browser check failed: ${describeError(error)}`,
+async function main() {
+  const options = parseArguments(process.argv.slice(2));
+  if (options.help) {
+    showHelp();
+    return;
+  }
+
+  const result = await runProductionBrowserCheck(options);
+  console.info(
+    `Production browser check passed with ${result.browserExecutable}.`,
   );
-  process.exitCode = 1;
+  console.info(
+    JSON.stringify(
+      result,
+      null,
+      2,
+    ),
+  );
+}
+
+const isMainModule =
+  process.argv[1] !== undefined &&
+  import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
+
+if (isMainModule) {
+  try {
+    await main();
+  } catch (error) {
+    console.error(
+      `Production browser check failed: ${describeError(error)}`,
+    );
+    process.exitCode = 1;
+  }
 }

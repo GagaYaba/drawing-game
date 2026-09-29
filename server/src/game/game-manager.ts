@@ -2,20 +2,12 @@ import { randomUUID } from "node:crypto";
 
 import type {
   GuessValue,
-  PublicFinishedState,
-  PublicGameState,
-  PublicLeaderboardEntry,
-  PublicRevealState,
   PublicRoomState,
 } from "@drawing-game/shared";
 
 import type { RoomManager } from "../rooms/room-manager.js";
 import { RoomManagerError } from "../rooms/room-types.js";
-import type { InternalPlayer } from "../rooms/room-types.js";
-import {
-  cloneDrawingDocument,
-  validateSubmitDrawingPayload,
-} from "./drawing-validation.js";
+import { validateSubmitDrawingPayload } from "./drawing-validation.js";
 import { validateSubmitGuessPayload } from "./guess-validation.js";
 import {
   generateSecretLevel,
@@ -29,13 +21,37 @@ import type {
   GameManagerOptions,
   InternalGame,
   InternalTurn,
-  InternalTurnScoreResult,
   RequestRematchInternalResult,
   StartGameInternalResult,
   SubmitDrawingInternalResult,
   SubmitGuessInternalResult,
 } from "./game-types.js";
+import { createPublicFinishedState } from "./game-public-state.js";
+import {
+  applyTurnScores,
+  areAllGuessesSubmitted,
+  getEligibleVoterIds,
+  getNextTurnPosition,
+} from "./game-rules.js";
 import { DRAWING_PROMPTS } from "./prompt-bank.js";
+
+export {
+  createPublicFinishedState,
+  createPublicRevealState,
+  toPublicGameState,
+} from "./game-public-state.js";
+export {
+  applyTurnScores,
+  areAllGuessesSubmitted,
+  buildLeaderboard,
+  calculateDrawerPoints,
+  calculateGuessPoints,
+  getEligibleVoterIds,
+  getNextTurnPosition,
+  getSubmittedGuessCount,
+  hasNextTurn,
+} from "./game-rules.js";
+export type { NextTurnPosition } from "./game-rules.js";
 
 export const ROUND_INTRO_DURATION_MS = 3_000;
 export const TOTAL_ROUNDS = 2;
@@ -119,131 +135,6 @@ export function createGameId(
   return gameId;
 }
 
-function validatePlayerScore(player: InternalPlayer): void {
-  if (!Number.isSafeInteger(player.score) || player.score < 0) {
-    throw new RoomManagerError(
-      "INTERNAL_ERROR",
-      "Un score de joueur interne est invalide.",
-    );
-  }
-}
-
-function cloneTurnScoreResult(
-  result: InternalTurnScoreResult,
-): InternalTurnScoreResult {
-  return {
-    guesses: Object.fromEntries(
-      Object.entries(result.guesses).map(([playerId, guess]) => [
-        playerId,
-        { ...guess },
-      ]),
-    ),
-    drawer: { ...result.drawer },
-  };
-}
-
-function clonePublicFinishedState(
-  finishedState: PublicFinishedState,
-): PublicFinishedState {
-  return {
-    leaderboard: finishedState.leaderboard.map((entry) => ({
-      rank: entry.rank,
-      player: { ...entry.player },
-      score: entry.score,
-    })),
-    winners: finishedState.winners.map((winner) => ({ ...winner })),
-    completedRounds: finishedState.completedRounds,
-    completedTurns: finishedState.completedTurns,
-  };
-}
-
-export function calculateGuessPoints(distance: number): number {
-  if (
-    !Number.isFinite(distance) ||
-    !Number.isInteger(distance) ||
-    distance < 0
-  ) {
-    return 0;
-  }
-
-  return Math.max(0, 5 - distance);
-}
-
-export function calculateDrawerPoints(
-  distances: readonly number[],
-): number {
-  const closeGuessCount = distances.reduce(
-    (count, distance) =>
-      Number.isFinite(distance) &&
-      Number.isInteger(distance) &&
-      distance >= 0 &&
-      distance <= 1
-        ? count + 1
-        : count,
-    0,
-  );
-
-  return Math.min(5, closeGuessCount);
-}
-
-export interface NextTurnPosition {
-  currentRound: number;
-  currentDrawerIndex: number;
-  currentTurnNumber: number;
-}
-
-type TurnPositionSource = Pick<
-  InternalGame,
-  "currentRound" | "currentDrawerIndex" | "totalRounds" | "turnOrder"
->;
-
-export function getNextTurnPosition(
-  game: TurnPositionSource,
-): NextTurnPosition | null {
-  const playerCount = game.turnOrder.length;
-
-  if (
-    playerCount < 1 ||
-    !Number.isSafeInteger(game.totalRounds) ||
-    game.totalRounds < 1 ||
-    !Number.isSafeInteger(game.currentRound) ||
-    game.currentRound < 1 ||
-    game.currentRound > game.totalRounds ||
-    !Number.isSafeInteger(game.currentDrawerIndex) ||
-    game.currentDrawerIndex < 0 ||
-    game.currentDrawerIndex >= playerCount
-  ) {
-    throw new RoomManagerError(
-      "INTERNAL_ERROR",
-      "La position du tour actuel est invalide.",
-    );
-  }
-
-  const nextDrawerIndex = game.currentDrawerIndex + 1;
-  if (nextDrawerIndex < playerCount) {
-    return {
-      currentRound: game.currentRound,
-      currentDrawerIndex: nextDrawerIndex,
-      currentTurnNumber:
-        (game.currentRound - 1) * playerCount + nextDrawerIndex + 1,
-    };
-  }
-
-  if (game.currentRound >= game.totalRounds) {
-    return null;
-  }
-
-  return {
-    currentRound: game.currentRound + 1,
-    currentDrawerIndex: 0,
-    currentTurnNumber: game.currentRound * playerCount + 1,
-  };
-}
-
-export function hasNextTurn(game: TurnPositionSource): boolean {
-  return getNextTurnPosition(game) !== null;
-}
-
 export function initializeTurn(
   turnId: string,
   drawerPlayerId: string,
@@ -260,444 +151,6 @@ export function initializeTurn(
     guesses: {},
     scoresAppliedAt: null,
     scoreResult: null,
-  };
-}
-
-export function buildLeaderboard(
-  players: readonly InternalPlayer[],
-  turnOrder: readonly string[],
-): PublicLeaderboardEntry[] {
-  const orderByPlayerId = new Map(
-    turnOrder.map((playerId, index) => [playerId, index]),
-  );
-
-  const sortedPlayers = [...players].sort((left, right) => {
-    validatePlayerScore(left);
-    validatePlayerScore(right);
-
-    if (left.score !== right.score) {
-      return right.score - left.score;
-    }
-
-    const leftOrder =
-      orderByPlayerId.get(left.id) ?? Number.MAX_SAFE_INTEGER;
-    const rightOrder =
-      orderByPlayerId.get(right.id) ?? Number.MAX_SAFE_INTEGER;
-
-    return leftOrder - rightOrder;
-  });
-
-  let previousScore: number | null = null;
-  let previousRank = 0;
-
-  return sortedPlayers.map((player, index) => {
-    const rank =
-      previousScore !== null && player.score === previousScore
-        ? previousRank
-        : index + 1;
-
-    previousScore = player.score;
-    previousRank = rank;
-
-    return {
-      rank,
-      player: {
-        id: player.id,
-        nickname: player.nickname,
-      },
-      score: player.score,
-    };
-  });
-}
-
-export function getEligibleVoterIds(
-  game: InternalGame,
-  players: readonly InternalPlayer[],
-): string[] {
-  const gamePlayerIds = new Set(game.turnOrder);
-
-  return players
-    .filter(
-      (player) =>
-        player.id !== game.currentTurn.drawerPlayerId &&
-        gamePlayerIds.has(player.id),
-    )
-    .map((player) => player.id);
-}
-
-export function getSubmittedGuessCount(
-  game: InternalGame,
-  eligibleVoterIds: readonly string[],
-): number {
-  return eligibleVoterIds.reduce(
-    (count, playerId) =>
-      Object.prototype.hasOwnProperty.call(
-        game.currentTurn.guesses,
-        playerId,
-      )
-        ? count + 1
-        : count,
-    0,
-  );
-}
-
-export function areAllGuessesSubmitted(
-  game: InternalGame,
-  eligibleVoterIds: readonly string[],
-): boolean {
-  return (
-    eligibleVoterIds.length > 0 &&
-    getSubmittedGuessCount(game, eligibleVoterIds) === eligibleVoterIds.length
-  );
-}
-
-export function applyTurnScores(
-  game: InternalGame,
-  players: readonly InternalPlayer[],
-  appliedAt: number,
-): InternalTurnScoreResult {
-  const turn = game.currentTurn;
-  const hasAppliedTimestamp = turn.scoresAppliedAt !== null;
-  const hasScoreResult = turn.scoreResult !== null;
-
-  if (hasAppliedTimestamp || hasScoreResult) {
-    if (!hasAppliedTimestamp || !hasScoreResult) {
-      throw new RoomManagerError(
-        "INTERNAL_ERROR",
-        "Le calcul des scores du tour est incohérent.",
-      );
-    }
-
-    return cloneTurnScoreResult(turn.scoreResult as InternalTurnScoreResult);
-  }
-
-  if (!Number.isFinite(appliedAt)) {
-    throw new RoomManagerError(
-      "INTERNAL_ERROR",
-      "Impossible de dater le calcul des scores.",
-    );
-  }
-
-  const eligibleVoterIds = getEligibleVoterIds(game, players);
-  if (!areAllGuessesSubmitted(game, eligibleVoterIds)) {
-    throw new RoomManagerError(
-      "INTERNAL_ERROR",
-      "Toutes les estimations doivent être présentes avant le calcul des scores.",
-    );
-  }
-
-  const playersById = new Map(players.map((player) => [player.id, player]));
-  const drawer = playersById.get(turn.drawerPlayerId);
-  if (drawer === undefined) {
-    throw new RoomManagerError(
-      "INTERNAL_ERROR",
-      "Le dessinateur du tour est introuvable.",
-    );
-  }
-
-  validatePlayerScore(drawer);
-
-  const distances: number[] = [];
-  const guessResults: InternalTurnScoreResult["guesses"] = {};
-  const scoreUpdates = new Map<string, number>();
-
-  for (const playerId of eligibleVoterIds) {
-    const player = playersById.get(playerId);
-    const guess = turn.guesses[playerId];
-
-    if (
-      player === undefined ||
-      guess === undefined ||
-      guess.playerId !== playerId
-    ) {
-      throw new RoomManagerError(
-        "INTERNAL_ERROR",
-        "Une estimation attendue est introuvable.",
-      );
-    }
-
-    validatePlayerScore(player);
-    const distance = Math.abs(guess.value - turn.secretLevel);
-    const pointsEarned = calculateGuessPoints(distance);
-    const totalScore = player.score + pointsEarned;
-
-    distances.push(distance);
-    scoreUpdates.set(playerId, totalScore);
-    guessResults[playerId] = {
-      playerId,
-      distance,
-      pointsEarned,
-      totalScore,
-    };
-  }
-
-  const closeGuessCount = distances.filter(
-    (distance) => distance <= 1,
-  ).length;
-  const drawerPoints = calculateDrawerPoints(distances);
-  const drawerTotalScore = drawer.score + drawerPoints;
-  const result: InternalTurnScoreResult = {
-    guesses: guessResults,
-    drawer: {
-      playerId: drawer.id,
-      closeGuessCount,
-      pointsEarned: drawerPoints,
-      totalScore: drawerTotalScore,
-    },
-  };
-
-  scoreUpdates.set(drawer.id, drawerTotalScore);
-  for (const [playerId, totalScore] of scoreUpdates) {
-    const player = playersById.get(playerId);
-    if (player === undefined) {
-      throw new RoomManagerError(
-        "INTERNAL_ERROR",
-        "Un joueur à créditer est introuvable.",
-      );
-    }
-    player.score = totalScore;
-  }
-
-  turn.scoreResult = result;
-  turn.scoresAppliedAt = appliedAt;
-
-  return cloneTurnScoreResult(result);
-}
-
-export function createPublicRevealState(
-  game: InternalGame,
-  players: readonly InternalPlayer[],
-): PublicRevealState {
-  const scoreResult = game.currentTurn.scoreResult;
-  if (
-    game.currentTurn.scoresAppliedAt === null ||
-    scoreResult === null
-  ) {
-    throw new RoomManagerError(
-      "INTERNAL_ERROR",
-      "Les scores du tour doivent être calculés avant la révélation.",
-    );
-  }
-
-  const eligibleVoterIds = getEligibleVoterIds(game, players);
-  const eligibleVoterIdSet = new Set(eligibleVoterIds);
-
-  const guesses = players
-    .filter((player) => eligibleVoterIdSet.has(player.id))
-    .map((player) => {
-      const guess = game.currentTurn.guesses[player.id];
-      const result = scoreResult.guesses[player.id];
-
-      if (
-        guess === undefined ||
-        guess.playerId !== player.id ||
-        !Number.isFinite(guess.submittedAt) ||
-        result === undefined ||
-        result.playerId !== player.id
-      ) {
-        throw new RoomManagerError(
-          "INTERNAL_ERROR",
-          "Une estimation attendue est introuvable.",
-        );
-      }
-
-      return {
-        player: {
-          id: player.id,
-          nickname: player.nickname,
-        },
-        value: guess.value,
-        distance: result.distance,
-        pointsEarned: result.pointsEarned,
-        totalScore: result.totalScore,
-      };
-    });
-
-  if (guesses.length !== eligibleVoterIds.length) {
-    throw new RoomManagerError(
-      "INTERNAL_ERROR",
-      "Impossible de publier toutes les estimations.",
-    );
-  }
-
-  const drawer = players.find(
-    (player) => player.id === game.currentTurn.drawerPlayerId,
-  );
-  if (
-    drawer === undefined ||
-    scoreResult.drawer.playerId !== drawer.id
-  ) {
-    throw new RoomManagerError(
-      "INTERNAL_ERROR",
-      "Le résultat du dessinateur est introuvable.",
-    );
-  }
-
-  const nextPosition = getNextTurnPosition(game);
-  const nextDrawerId =
-    nextPosition === null
-      ? null
-      : game.turnOrder[nextPosition.currentDrawerIndex];
-  const nextDrawer =
-    nextDrawerId === null || nextDrawerId === undefined
-      ? null
-      : players.find((player) => player.id === nextDrawerId);
-
-  if (nextDrawerId !== null && nextDrawer === undefined) {
-    throw new RoomManagerError(
-      "INTERNAL_ERROR",
-      "Le prochain dessinateur est introuvable.",
-    );
-  }
-
-  return {
-    secretLevel: game.currentTurn.secretLevel,
-    guesses,
-    drawerResult: {
-      player: {
-        id: drawer.id,
-        nickname: drawer.nickname,
-      },
-      closeGuessCount: scoreResult.drawer.closeGuessCount,
-      pointsEarned: scoreResult.drawer.pointsEarned,
-      totalScore: scoreResult.drawer.totalScore,
-    },
-    leaderboard: buildLeaderboard(players, game.turnOrder),
-    nextDrawer:
-      nextDrawer === null || nextDrawer === undefined
-        ? null
-        : {
-            id: nextDrawer.id,
-            nickname: nextDrawer.nickname,
-          },
-  };
-}
-
-export function createPublicFinishedState(
-  game: InternalGame,
-  players: readonly InternalPlayer[],
-): PublicFinishedState {
-  const leaderboard = buildLeaderboard(players, game.turnOrder);
-  const winningScore = leaderboard[0]?.score;
-
-  if (winningScore === undefined) {
-    throw new RoomManagerError(
-      "INTERNAL_ERROR",
-      "Le classement final ne contient aucun joueur.",
-    );
-  }
-
-  return {
-    leaderboard,
-    winners: leaderboard
-      .filter((entry) => entry.score === winningScore)
-      .map((entry) => ({
-        id: entry.player.id,
-        nickname: entry.player.nickname,
-        score: entry.score,
-      })),
-    completedRounds: game.totalRounds,
-    completedTurns: game.turnOrder.length * game.totalRounds,
-  };
-}
-
-export function toPublicGameState(
-  game: InternalGame,
-  players: readonly InternalPlayer[],
-): PublicGameState {
-  const activeDrawer = players.find(
-    (player) => player.id === game.currentTurn.drawerPlayerId,
-  );
-  const historicalDrawer =
-    game.phase === "FINISHED"
-      ? game.finishedState?.leaderboard.find(
-          (entry) =>
-            entry.player.id === game.currentTurn.drawerPlayerId,
-        )?.player
-      : undefined;
-  const drawer = activeDrawer ?? historicalDrawer;
-
-  if (drawer === undefined) {
-    throw new RoomManagerError(
-      "INTERNAL_ERROR",
-      "Le dessinateur du tour est introuvable.",
-    );
-  }
-
-  const { drawing, drawingSubmittedAt } = game.currentTurn;
-  const submittedDrawingIsPublic =
-    game.phase === "VOTING" || game.phase === "REVEAL";
-  if (
-    submittedDrawingIsPublic &&
-    (drawing === null ||
-      drawingSubmittedAt === null ||
-      !Number.isFinite(drawingSubmittedAt))
-  ) {
-    throw new RoomManagerError(
-      "INTERNAL_ERROR",
-      "Le dessin soumis est introuvable.",
-    );
-  }
-
-  const eligibleVoterIds = getEligibleVoterIds(game, players);
-  if (
-    (game.phase === "FINISHED" && game.finishedState === null) ||
-    (game.phase !== "FINISHED" && game.finishedState !== null)
-  ) {
-    throw new RoomManagerError(
-      "INTERNAL_ERROR",
-      "L’état final interne de la partie est incohérent.",
-    );
-  }
-
-  return {
-    gameId: game.gameId,
-    phase: game.phase,
-    turnId: game.currentTurn.turnId,
-    totalRounds: game.totalRounds,
-    currentRound: game.currentRound,
-    currentTurnNumber:
-      (game.currentRound - 1) * game.turnOrder.length +
-      game.currentDrawerIndex +
-      1,
-    totalTurns: game.turnOrder.length * game.totalRounds,
-    currentDrawer: { id: drawer.id, nickname: drawer.nickname },
-    prompt: {
-      id: game.currentTurn.prompt.id,
-      statement: game.currentTurn.prompt.statement,
-      lowLabel: game.currentTurn.prompt.lowLabel,
-      highLabel: game.currentTurn.prompt.highLabel,
-    },
-    phaseEndsAt: game.phaseEndsAt,
-    submittedDrawing:
-      submittedDrawingIsPublic &&
-      drawing !== null &&
-      drawingSubmittedAt !== null
-        ? {
-            document: cloneDrawingDocument(drawing),
-            submittedAt: drawingSubmittedAt,
-          }
-        : null,
-    voting:
-      game.phase === "VOTING"
-        ? {
-            eligibleVoterCount: eligibleVoterIds.length,
-            submittedGuessCount: getSubmittedGuessCount(
-              game,
-              eligibleVoterIds,
-            ),
-          }
-        : null,
-    reveal:
-      game.phase === "REVEAL"
-        ? createPublicRevealState(game, players)
-        : null,
-    finished:
-      game.phase === "FINISHED"
-        ? clonePublicFinishedState(
-            game.finishedState as PublicFinishedState,
-          )
-        : null,
   };
 }
 
