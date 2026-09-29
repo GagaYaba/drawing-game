@@ -96,7 +96,7 @@ Les services sont alors accessibles aux adresses suivantes :
 
 Vite redirige `/api` et `/socket.io` vers Express, y compris les connexions WebSocket. Le frontend peut donc appeler l'API et Socket.IO sans URL de serveur codée en dur.
 
-## Essayer une partie depuis plusieurs navigateurs
+## Essayer une partie à plusieurs joueurs
 
 1. Lancez l'application avec `npm run dev`, puis ouvrez <http://localhost:5173> dans un premier navigateur.
 2. Saisissez un pseudonyme et cliquez sur **Créer une partie**.
@@ -376,6 +376,8 @@ La suite couvre notamment :
 ## Intégration continue
 
 Le protocole détaillé des quatre environnements, de la livraison, du rollback et des seuils mesurables est documenté dans [C.2.1.1 — Environnements, déploiement continu, qualité et performance](docs/c2-1-1-environnements-deploiement-qualite-performance.md).
+
+Le cycle de contribution et les responsabilités sont définis dans [C2.1.2 — Protocole d'intégration continue](docs/c2-1-2-protocole-integration-continue.md) : branche dédiée → pull request vers `main` → contrôle GitHub Actions `Verify` → fusion → nouveau contrôle sur `main`. Une pull request ne doit pas être fusionnée tant que `Verify` échoue ou n'est pas terminé.
 
 La porte unique locale et CI exécute le typecheck, tous les tests, le build, le smoke test compilé, puis les budgets de performance et de taille :
 
