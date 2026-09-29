@@ -20,7 +20,8 @@
     "quality:performance": "node scripts/quality-performance-check.mjs",
     "quality:check": "node scripts/quality-check.mjs",
     "postdeploy:check": "node scripts/post-deploy-check.mjs",
-    "check:browser": "node scripts/production-browser-check.mjs"
+    "check:browser": "node scripts/production-browser-check.mjs",
+    "prototype:check": "node scripts/prototype-check.mjs"
   },
   "engines": {
     "node": ">=22.12.0 <23.0.0",

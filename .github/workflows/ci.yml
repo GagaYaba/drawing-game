@@ -46,3 +46,15 @@ jobs:
           path: reports/c2-1-1/quality-performance-report.json
           if-no-files-found: warn
           retention-days: 14
+
+      - name: Validate C2.2.1 production prototype
+        run: npm run prototype:check
+
+      - name: Upload C2.2.1 production prototype evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: c2-2-1-production-prototype
+          path: reports/c2-2-1/
+          if-no-files-found: warn
+          retention-days: 90

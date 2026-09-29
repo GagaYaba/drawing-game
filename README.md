@@ -356,6 +356,8 @@ npm test
 
 Cette commande lance les tests Vitest : tests unitaires de la logique des salons, de la partie, du score, des estimations, du document vectoriel et de sa géométrie, ainsi que des tests d'intégration avec un serveur sur un port éphémère et de vrais clients Socket.IO.
 
+Le nombre exact de tests exécutés n'est pas figé dans cette documentation : il est relevé à chaque passage de la porte de qualité dans `reports/c2-1-1/quality-performance-report.json`.
+
 La suite couvre notamment :
 
 - les validations strictes des salons, dessins, votes, `game:start`, `game:continue` et `game:request-rematch`, ainsi que les autorisations de l'hôte et du dessinateur ;
@@ -391,6 +393,20 @@ Elle produit `reports/c2-1-1/quality-performance-report.json`; ce dossier géné
 
 La configuration Render cible `main` et utilise `autoDeployTrigger: checksPass` : les checks réussis autorisent son déploiement automatique; un échec de la porte bloque ce chemin de livraison.
 
+## Prototype et architecture C2.2.1
+
+L'architecture, la traçabilité des user stories, les composants, la matrice d'ergonomie et les exigences de sécurité sont documentés dans [C2.2.1 — Prototype de production et architecture logicielle](docs/c2-2-1-prototype-architecture.md).
+
+Avec Node `22.12.0` et Chrome, Chromium ou Edge déjà installé, la preuve autonome du prototype se lance avec :
+
+```bash
+npm run prototype:check
+```
+
+Elle construit et démarre le serveur de production sur un port éphémère, pilote trois joueurs pendant deux manches et produit un rapport JSON ainsi que des captures sous `reports/c2-2-1/`. Le scénario est configuré pour vérifier les téléphones `320×568`, `375×667`, `390×844`, les tablettes `768×1024` en portrait et `1024×768` en paysage, puis les ordinateurs `1366×768`, `1440×900`, `1920×1080`. Les contrôles automatisés portent notamment sur les débordements, les contenus et commandes des phases, les dialogues et la fermeture clavier. La réussite de cette nouvelle couverture tablette doit encore être établie par la CI sous Node `22.12.0`. Le canvas cible aussi le tactile et le stylet grâce aux Pointer Events, sans test sur appareil physique, et le modèle de dessin n'enregistre pas la pression du stylet.
+
+Après la porte C2.1.1, le job GitHub Actions `Verify` exécute cette commande et publie le dossier comme artefact `c2-2-1-production-prototype` pendant 90 jours, y compris le rapport d'échec lorsque le scénario n'aboutit pas.
+
 ## Build et lancement en production
 
 Construisez le code partagé, le serveur TypeScript et le frontend Vite :
@@ -419,13 +435,13 @@ Après un déploiement, contrôlez sans créer de salon la santé, le frontend e
 npm run postdeploy:check -- --url https://drawing-scale-game.onrender.com
 ```
 
-Le parcours navigateur plus large est optionnel, requiert un serveur compilé déjà lancé ainsi que Chrome, Chromium ou Edge, et crée réellement des salons :
+Le point d'entrée navigateur bas niveau reste utilisable séparément. Il requiert un serveur compilé déjà lancé ainsi que Chrome, Chromium ou Edge, et crée réellement des salons :
 
 ```bash
 npm run check:browser -- --url http://127.0.0.1:3000
 ```
 
-Il n'est pas inclus dans la porte CI afin de ne pas la rendre dépendante d'une installation Chromium.
+Le workflow ne lance pas directement `check:browser` : `prototype:check` réutilise le même scénario, gère le build et le serveur, puis conserve ses preuves. Aucun navigateur n'est téléchargé ; l'exécution échoue clairement si le runner ne possède pas déjà un exécutable compatible.
 
 ## Déploiement sur Render
 

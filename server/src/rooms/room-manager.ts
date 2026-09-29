@@ -2,7 +2,7 @@ import { randomInt, randomUUID } from "node:crypto";
 
 import type { PublicPlayer, PublicRoomState } from "@drawing-game/shared";
 
-import { toPublicGameState } from "../game/game-manager.js";
+import { toPublicGameState } from "../game/game-public-state.js";
 import { isValidClientInstanceId } from "../sessions/client-instance-validation.js";
 import {
   createSessionToken,
